@@ -85,6 +85,66 @@ The player's levers are all indirect, all through the city:
 city out of the player's hands. If things go badly enough, the city can fall to
 rebellion, conquest or ruin, and that is a story too.
 
+## Bloodlines
+
+The founders establish family dynasties. Every citizen's ancestry is tracked from day one.
+Descent from a founder carries latent legitimacy: in year 100, a destitute dockworker whose
+great-great-grandfather was Founder #1 has a stronger claim than an upstart merchant king.
+When unrest peaks, the crowd can rally behind the "True Blood" sleeping in the slums.
+
+## Haunted infrastructure
+
+When a ruler dies violently in the palace, or a notable is crushed in a rushed cathedral
+collapse, a summary of their memory attaches to that building. Whoever later sleeps or works
+there is touched by it: dreams, paranoia, or personality drift driven by the dead notable's
+past. The player then decides what to do with the place: use it, seal it, or tear it down.
+
+## The judgment hall
+
+Grievances between citizens, guilds and nobles don't stay in council votes. They come to
+the judgment hall:
+
+```
+Dispute emerges (crowd or notables)
+  -> Public hearing (the AI notables brief their cases)
+    -> The player's ruling
+      -> Enforced by the town guard or bailiff
+        -> A precedent is set (shifts behaviour across the city)
+```
+
+- **Triggers:** a guild master accuses the high priest of stealing tithes; miners accuse the
+  stonemasons' guild of unsafe tunnelling beneath their homes.
+- **Presentation:** the claimants testify in their own words, grounded in real events in the
+  simulation ("His forge smoke ruined our sacred orchard on day 42").
+- **Rulings:**
+  - **In favour of one side:** awards damages, shifts faction favour, adjusts tariffs.
+  - **Compromise:** a forced settlement (the masons supply the temple with cut stone for free).
+  - **Dismiss both (autocratic):** throw both out, or seize the disputed asset for the crown.
+- **Precedent:** rulings become law. Siding with guilds over the temple permanently shifts
+  tax compliance and devotion across the city.
+
+## Monsters and expeditions
+
+When an elder beast or mythical threat emerges in the wild, dealing with it links the
+city's economy to the frontier:
+
+```
+Sighting or lair discovered
+  -> The council clashes over the response (hunt or appease)
+    -> The player provisions and outfits the warband
+      -> The expedition into the wild (led by the general)
+        -> Aftermath: trophies, arcane relics, or retaliation
+```
+
+- **The dilemma:** the general wants a glorious crusade; the high priest wants the beast
+  pacified with cattle sacrifices; the merchants want to trade for its venom or scales.
+- **Logistics:** the player designs the pack-train. How many masterwork polearms? Send the
+  elite city guard, and leave the streets open to the thieves' syndicate?
+- **Trophies:** the carcass is carted through the gates, and where the player puts it shapes
+  the city. Mounted in the town square, it raises bravery and reduces panic in future raids.
+  Delivered to the arcane scriptorium or the alchemists, it unlocks high-fantasy
+  infrastructure (dragon-blood heated aqueducts that keep crops growing through winter).
+
 ## War
 
 - **When the city is attacked** (raiders, a siege, a monster), the player commands the
@@ -135,3 +195,7 @@ political quarrel.
 - How magic works, and who has it.
 - How rival kingdoms are shown: on a world map, or only through what reaches the city.
 - How the player is told what the notables think (without a wall of text).
+- **Who judges in the judgment hall,** given that the city has a ruler the player doesn't
+  control. Proposed: the player is the ruler's unseen counsel ("the Steward"); the ruler
+  usually follows the verdict, but a distrustful ruler, or one with a stake in the case, may
+  overrule it. Seizing for the crown needs the ruler's will.
