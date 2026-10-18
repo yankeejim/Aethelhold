@@ -15,6 +15,7 @@ The agreed concept is in `docs/concept.md`. Read it before designing or building
 - Drama: interpersonal conflict, the city itself (fire, plague, hunger, unrest), rival kingdoms,
   and occasional monsters.
 - War: the player commands defense of the city; the general leads campaigns abroad.
+- Look: like Manor Lords (grounded, natural, detailed). The first test uses humans only.
 
 ## How we work
 

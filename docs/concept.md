@@ -102,6 +102,11 @@ rebellion, conquest or ruin, and that is a story too.
 - **Endless sandbox,** growing from a handful of founders, as in Dwarf Fortress and Songs
   of Syx.
 
+## Look
+
+Like Manor Lords: grounded, natural and detailed, with real terrain, forests, weather and
+seasons, warm natural light, and medieval-style buildings that rise in visible stages.
+
 ## How it will be built
 
 - **Unreal Engine 5, C++,** simulation and graphics in one place: thousands of citizens
@@ -126,8 +131,7 @@ political quarrel.
 
 ## Open questions
 
-- Which races exist, and what each one is like.
+- Which races exist, and what each one is like (the first test uses humans only).
 - How magic works, and who has it.
 - How rival kingdoms are shown: on a world map, or only through what reaches the city.
 - How the player is told what the notables think (without a wall of text).
-- Art direction: stylized, or realistic.
