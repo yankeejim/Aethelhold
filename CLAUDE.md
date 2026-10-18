@@ -2,6 +2,7 @@
 
 A high-fantasy city-builder for PC in Unreal Engine 5. Team: Jim (designer, owner) and Claude.
 The agreed concept is in `docs/concept.md`. Read it before designing or building anything.
+Detailed designs: `docs/resources.md` (materials, workshops, hauling, spoilage, skills).
 
 ## Settled decisions (don't change without asking Jim)
 
