@@ -14,6 +14,8 @@ The agreed concept is in `docs/concept.md`. Read it before designing or building
   only indirectly, mostly through what gets built.
 - Drama: interpersonal conflict, the city itself (fire, plague, hunger, unrest), rival kingdoms,
   and occasional monsters.
+- In the judgment hall the player is the ruler's unseen counsel ("the Steward"): the ruler usually
+  follows the verdict but may overrule it.
 - War: the player commands defense of the city; the general leads campaigns abroad.
 - Look: like Manor Lords (grounded, natural, detailed). The first test uses humans only.
 

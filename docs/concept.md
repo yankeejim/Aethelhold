@@ -102,7 +102,9 @@ past. The player then decides what to do with the place: use it, seal it, or tea
 ## The judgment hall
 
 Grievances between citizens, guilds and nobles don't stay in council votes. They come to
-the judgment hall:
+the judgment hall. The player sits there as the ruler's unseen counsel, "the Steward": the
+ruler usually follows the Steward's verdict, but a ruler who distrusts the Steward, or has a
+stake in the case, may overrule it. Seizing an asset for the crown needs the ruler's will.
 
 ```
 Dispute emerges (crowd or notables)
@@ -184,6 +186,9 @@ Seven founders arrive at a wild site and must survive their first winter:
 - founders with needs (food, warmth, rest), skills and personalities, doing the work
   themselves;
 - the first leader among them;
+- the first cases in the judgment hall (who ate the stored berries, who gets the warm spot by
+  the fire) and the first precedents;
+- the founders' bloodlines tracked from day one;
 - the first winter as the threat.
 
 When that is fun to play, the city grows: migrants, the first notables, the first
@@ -195,7 +200,3 @@ political quarrel.
 - How magic works, and who has it.
 - How rival kingdoms are shown: on a world map, or only through what reaches the city.
 - How the player is told what the notables think (without a wall of text).
-- **Who judges in the judgment hall,** given that the city has a ruler the player doesn't
-  control. Proposed: the player is the ruler's unseen counsel ("the Steward"); the ruler
-  usually follows the verdict, but a distrustful ruler, or one with a stake in the case, may
-  overrule it. Seizing for the crown needs the ruler's will.
