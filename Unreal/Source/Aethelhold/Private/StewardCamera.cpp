@@ -14,6 +14,7 @@
 #include "Colony.h"
 #include "EngineUtils.h"
 #include "Founder.h"
+#include "Forest.h"
 
 AStewardCamera::AStewardCamera()
 {
@@ -110,6 +111,7 @@ void AStewardCamera::BuildInput()
 	SpeedActions[1] = Button(EKeys::Two);
 	SpeedActions[2] = Button(EKeys::Three);
 	FollowAction = Button(EKeys::F);
+	MarkAction = Button(EKeys::C);
 }
 
 void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -137,6 +139,8 @@ void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(SpeedActions[1], ETriggerEvent::Started, this, &AStewardCamera::OnSpeed2);
 		EIC->BindAction(SpeedActions[2], ETriggerEvent::Started, this, &AStewardCamera::OnSpeed3);
 		EIC->BindAction(FollowAction, ETriggerEvent::Started, this, &AStewardCamera::OnFollow);
+		EIC->BindAction(MarkAction, ETriggerEvent::Started, this, &AStewardCamera::OnMarkTrees);
+		EIC->BindAction(SelectAction, ETriggerEvent::Completed, this, &AStewardCamera::OnSelectReleased);
 	}
 }
 
@@ -159,12 +163,36 @@ AColony* AStewardCamera::GetColony()
 	return Colony.Get();
 }
 
+bool AStewardCamera::GroundUnderCursor(FVector& Out) const
+{
+	const APlayerController* PC = Cast<APlayerController>(GetController());
+	FHitResult Hit;
+	if (PC && PC->GetHitResultUnderCursorForObjects({ UEngineTypes::ConvertToObjectType(ECC_WorldStatic) }, false, Hit))
+	{
+		Out = Hit.ImpactPoint;
+		return true;
+	}
+	return false;
+}
+
 void AStewardCamera::OnSelect()
 {
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	AAethelHUD* Hud = PC ? Cast<AAethelHUD>(PC->GetHUD()) : nullptr;
 	if (!Hud)
 	{
+		return;
+	}
+	// Marking trees: press, drag across them, let go.
+	AColony* C = GetColony();
+	if (C && C->IsMarkingTrees())
+	{
+		bDragging = GroundUnderCursor(DragStart);
+		float X, Y;
+		if (bDragging && PC->GetMousePosition(X, Y))
+		{
+			Hud->BeginDrag(FVector2D(X, Y));
+		}
 		return;
 	}
 	FHitResult Hit;
@@ -174,6 +202,48 @@ void AStewardCamera::OnSelect()
 	if (!Founder)
 	{
 		bFollow = false;
+	}
+}
+
+void AStewardCamera::OnSelectReleased()
+{
+	if (!bDragging)
+	{
+		return;
+	}
+	bDragging = false;
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (AAethelHUD* Hud = PC ? Cast<AAethelHUD>(PC->GetHUD()) : nullptr)
+	{
+		Hud->EndDrag();
+	}
+	FVector End;
+	AColony* C = GetColony();
+	if (!C || !GroundUnderCursor(End))
+	{
+		return;
+	}
+	// A click marks the trees around that spot; a drag marks everything inside. Shift unmarks.
+	FVector2D A(DragStart), B(End);
+	if (FVector2D::Distance(A, B) < 300.f)
+	{
+		A -= FVector2D(400.f);
+		B += FVector2D(400.f);
+	}
+	const bool bUnmark = PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift);
+	const int32 Count = C->GetForest()->MarkArea(A, B, !bUnmark);
+	if (Count > 0)
+	{
+		C->Say(bUnmark ? FString::Printf(TEXT("%d trees will be left standing."), Count)
+			: FString::Printf(TEXT("%d trees marked for felling."), Count));
+	}
+}
+
+void AStewardCamera::OnMarkTrees()
+{
+	if (AColony* C = GetColony())
+	{
+		C->SetMarkingTrees(!C->IsMarkingTrees());
 	}
 }
 

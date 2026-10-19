@@ -36,6 +36,9 @@ private:
 	void OnTurn(const FInputActionValue& Value);
 	void OnLook(const FInputActionValue& Value);
 	void OnSelect();
+	void OnSelectReleased();
+	void OnMarkTrees();
+	bool GroundUnderCursor(FVector& Out) const;
 	void OnPause();
 	void OnSpeed1() { SetSpeed(1); }
 	void OnSpeed2() { SetSpeed(3); }
@@ -97,6 +100,13 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UInputAction> FollowAction;
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> MarkAction;
+
+	/** Where a drag to mark trees began, on the ground. */
+	FVector DragStart = FVector::ZeroVector;
+	bool bDragging = false;
 
 	TWeakObjectPtr<class AColony> Colony;
 	/** Keep the selected founder centred until the player pans away. */

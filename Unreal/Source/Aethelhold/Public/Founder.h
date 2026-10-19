@@ -6,6 +6,7 @@
 
 class AColony;
 class UAnimSequence;
+class AItem;
 class UCapsuleComponent;
 class USkeletalMeshComponent;
 
@@ -17,7 +18,8 @@ enum class ETemperament : uint8 { Calm, Cheerful, HotHeaded, Gloomy, Proud, Timi
 
 /** What a founder is doing, which is also what the card says about them. */
 UENUM()
-enum class EActivity : uint8 { Arriving, Wandering, Resting, Talking, Eating, Warming, Sleeping };
+enum class EActivity : uint8 { Arriving, Wandering, Resting, Talking, Eating, Warming, Sleeping,
+	Chopping, Foraging, Fishing, Hauling };
 
 /** Who a founder is: fixed at the founding, apart from age. */
 USTRUCT()
@@ -73,6 +75,14 @@ public:
 
 private:
 	void Choose();
+	/** Picks a job for working hours; false when there is nothing to do. */
+	bool FindWork();
+	/** Lets go of whatever this founder holds or has claimed (an item, a tree, a shrub). */
+	void LetGo();
+	void Arrive();
+	void Work(float GameHours);
+	void CarryTo(AItem* Item);
+	FVector FishingSpot() const;
 	bool WalkTo(const FVector& Target, float GameHours);
 	FVector PickWanderSpot() const;
 	FVector SleepSpot() const;
@@ -109,4 +119,14 @@ private:
 	int32 TalkingWith = INDEX_NONE;
 	bool bLying = false;
 	int32 LastMealHour = -100;
+
+	// Work in hand.
+	UPROPERTY()
+	TObjectPtr<AItem> Carried;
+	/** The item being fetched, before it is picked up. */
+	UPROPERTY()
+	TObjectPtr<AItem> Fetching;
+	int32 Tree = INDEX_NONE;
+	float WorkLeft = 0.f;
+	bool bWaitingForFall = false;
 };

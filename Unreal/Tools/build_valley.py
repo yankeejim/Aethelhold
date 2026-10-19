@@ -442,8 +442,7 @@ def build():
     log("landscape")
     unreal.ValleyBuilder.build_landscape(ground, SEED)
     build_river(river_material(unreal.ValleyBuilder.build_flow_map(SEED)))
-    log("forest")
-    unreal.ValleyBuilder.build_forest(SEED)
+    # Trees are planted by the game itself when it starts (AForest), so founders can fell them.
     unreal.ValleyBuilder.build_rocks(SEED)
     build_sky()
 

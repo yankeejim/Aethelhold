@@ -29,10 +29,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Aethelhold")
 	static UTexture2D* BuildForestMask(int32 Seed);
 
-	/** Plants the woods, riverside trees, lone meadow oaks and shrubs (Megaplants, with wind). */
-	UFUNCTION(BlueprintCallable, Category = "Aethelhold")
-	static AActor* BuildForest(int32 Seed);
-
 	/** Scatters Megascans rocks: boulders in the woods and on steep ground, small mossy stones
 	 *  along the river and here and there in the meadow. */
 	UFUNCTION(BlueprintCallable, Category = "Aethelhold")

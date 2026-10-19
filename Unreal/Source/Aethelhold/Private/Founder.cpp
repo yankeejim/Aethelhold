@@ -1,5 +1,7 @@
 #include "Founder.h"
 #include "Colony.h"
+#include "Forest.h"
+#include "Item.h"
 #include "Animation/AnimSequence.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -105,6 +107,15 @@ FString AFounder::Describe() const
 	case EActivity::Eating: return bWalking ? TEXT("Going to the fire to eat") : TEXT("Eating by the fire");
 	case EActivity::Warming: return bWalking ? TEXT("Cold, going to the fire") : TEXT("Warming up by the fire");
 	case EActivity::Sleeping: return bWalking ? TEXT("Going to sleep") : TEXT("Asleep by the fire");
+	case EActivity::Chopping:
+		return bWalking ? TEXT("Going to fell a tree") : bWaitingForFall ? TEXT("Timber!") : TEXT("Felling a tree");
+	case EActivity::Foraging:
+		return Carried ? TEXT("Bringing hazelnuts to the stockpile") : bWalking ? TEXT("Going to gather hazelnuts") : TEXT("Gathering hazelnuts");
+	case EActivity::Fishing:
+		return Carried ? TEXT("Bringing the catch to the stockpile") : bWalking ? TEXT("Going down to the river to fish") : TEXT("Fishing");
+	case EActivity::Hauling:
+		return Carried ? FString::Printf(TEXT("Carrying a %s to the stockpile"), *Carried->Name())
+			: Fetching ? FString::Printf(TEXT("Fetching a %s"), *Fetching->Name()) : TEXT("Hauling");
 	}
 	return FString();
 }
@@ -240,6 +251,277 @@ void AFounder::Choose()
 	Pause = Rng.FRandRange(0.2f, 0.8f);
 }
 
+FVector AFounder::FishingSpot() const
+{
+	// Somewhere along the near bank, within a short walk of camp.
+	const FValleyTerrain& Land = Colony->GetTerrain();
+	const FVector Fire = Colony->GetFire();
+	for (int32 Tries = 0; Tries < 12; ++Tries)
+	{
+		const float Y = Fire.Y / 100.f + Rng.FRandRange(-60.f, 60.f);
+		const float Center = Land.RiverCenterX(Y);
+		const float Side = Fire.X / 100.f > Center ? 1.f : -1.f;
+		for (float Out = 2.f; Out < 30.f; Out += 1.f)
+		{
+			const float X = Center + Side * (Land.RiverHalfWidth(Center, Y) + Out);
+			const FVector Spot = Colony->OnGround(X * 100.f, Y * 100.f);
+			if (Colony->IsDryLand(Spot))
+			{
+				return Spot;
+			}
+		}
+	}
+	return Colony->GetFire();
+}
+
+void AFounder::CarryTo(AItem* Item)
+{
+	Fetching = nullptr;
+	Carried = Item;
+	Item->bClaimed = true;
+	Target = Colony->StockSpot(Item->Type);
+	bHasTarget = true;
+}
+
+void AFounder::LetGo()
+{
+	if (Carried)
+	{
+		Colony->Drop(Carried, GetActorLocation() + GetActorForwardVector() * 60.f);
+		Carried = nullptr;
+	}
+	if (Fetching)
+	{
+		Fetching->bClaimed = false;
+		Fetching = nullptr;
+	}
+	if (Tree != INDEX_NONE && !bWaitingForFall)
+	{
+		Colony->GetForest()->GetTrees()[Tree].bClaimed = false;
+		Tree = INDEX_NONE;
+	}
+	WorkLeft = 0.f;
+}
+
+bool AFounder::FindWork()
+{
+	AForest* Forest = Colony->GetForest();
+	const FVector Camp = Colony->GetFire();
+	const bool bChild = Info.IsChild();
+
+	// Things lying about get carried in; children only fetch what's close to camp.
+	AItem* Loose = Colony->LooseItemNear(bChild ? Camp : GetActorLocation(), bChild ? 3000.f : 15000.f);
+
+	auto GoNear = [this](const FVector& Spot, float Distance)
+	{
+		FVector Side = GetActorLocation() - Spot;
+		Side.Z = 0.f;
+		const FVector Stand = Spot + Side.GetSafeNormal() * Distance;
+		Target = Colony->OnGround(Stand.X, Stand.Y);
+		bHasTarget = true;
+	};
+	auto Chop = [&]()
+	{
+		const int32 Marked = bChild ? INDEX_NONE : Forest->NearestMarked(Camp);
+		if (Marked == INDEX_NONE)
+		{
+			return false;
+		}
+		Tree = Marked;
+		Forest->GetTrees()[Tree].bClaimed = true;
+		Activity = EActivity::Chopping;
+		GoNear(Forest->GetTrees()[Tree].Base(), 110.f);
+		return true;
+	};
+	auto Forage = [&]()
+	{
+		const int32 Shrub = Forest->NearestForage(bChild ? GetActorLocation() : Camp, bChild ? 4000.f : 25000.f);
+		if (Shrub == INDEX_NONE)
+		{
+			return false;
+		}
+		Tree = Shrub;
+		Forest->GetTrees()[Tree].bClaimed = true;
+		Activity = EActivity::Foraging;
+		GoNear(Forest->GetTrees()[Tree].Base(), 150.f);
+		return true;
+	};
+	auto Fish = [&]()
+	{
+		Activity = EActivity::Fishing;
+		Target = FishingSpot();
+		bHasTarget = true;
+		return true;
+	};
+	auto Haul = [&]()
+	{
+		if (!Loose)
+		{
+			return false;
+		}
+		Activity = EActivity::Hauling;
+		Fetching = Loose;
+		Loose->bClaimed = true;
+		Target = Colony->OnGround(Loose->GetActorLocation().X, Loose->GetActorLocation().Y);
+		bHasTarget = true;
+		return true;
+	};
+
+	// Each turns first to their own trade, then lends a hand where it's needed.
+	if (bChild)
+	{
+		return Haul() || Forage();
+	}
+	switch (Info.Skill)
+	{
+	case ESkill::Fisher: return Fish();
+	case ESkill::Woodcutter:
+	case ESkill::Builder: return Chop() || Haul() || Forage();
+	case ESkill::Herder: return Haul() || Chop() || Forage();
+	default: return Forage() || Haul() || Chop();
+	}
+}
+
+void AFounder::Arrive()
+{
+	PlayAnim(IdleAnim, 1.f);
+	auto Face = [this](const FVector& Where)
+	{
+		SetActorRotation(FRotator(0.f, (Where - GetActorLocation()).Rotation().Yaw, 0.f));
+	};
+
+	if (Carried)
+	{
+		// At the stockpile with something to put down.
+		Colony->Store(Carried);
+		Carried = nullptr;
+		Activity = EActivity::Resting;
+		Pause = Rng.FRandRange(0.05f, 0.2f);
+		return;
+	}
+	switch (Activity)
+	{
+	case EActivity::Sleeping:
+		Face(Colony->GetFire());
+		LieDown(true);
+		break;
+	case EActivity::Eating:
+		Face(Colony->GetFire());
+		if (Colony->TakeMeal())
+		{
+			Food = FMath::Min(1.f, Food + 0.5f);
+		}
+		LastMealHour = Colony->GetDay() * 2 + (Colony->GetHour() > 12.f ? 1 : 0);
+		Pause = 0.5f;
+		break;
+	case EActivity::Warming:
+		Face(Colony->GetFire());
+		break;
+	case EActivity::Talking:
+		if (TalkingWith != INDEX_NONE)
+		{
+			Face(Colony->GetFounders()[TalkingWith]->GetActorLocation());
+		}
+		Pause = Rng.FRandRange(0.4f, 0.9f);
+		break;
+	case EActivity::Chopping:
+	{
+		const FTreeSpot& Spot = Colony->GetForest()->GetTrees()[Tree];
+		Face(Spot.Base());
+		// Young trees come down in under an hour; grown ones take a good while.
+		WorkLeft = Spot.Shape >= 2 ? 0.6f : 1.6f;
+		break;
+	}
+	case EActivity::Foraging:
+		Face(Colony->GetForest()->GetTrees()[Tree].Base());
+		WorkLeft = 0.8f;
+		break;
+	case EActivity::Fishing:
+	{
+		const float Y = GetActorLocation().Y / 100.f;
+		Face(FVector(Colony->GetTerrain().RiverCenterX(Y) * 100.f, GetActorLocation().Y, 0.f));
+		WorkLeft = Rng.FRandRange(1.5f, 2.5f);
+		break;
+	}
+	case EActivity::Hauling:
+		if (Fetching)
+		{
+			CarryTo(Fetching);
+		}
+		break;
+	default:
+		Pause = Rng.FRandRange(0.1f, 0.5f);
+		break;
+	}
+}
+
+void AFounder::Work(float GameHours)
+{
+	AForest* Forest = Colony->GetForest();
+	if (bWaitingForFall)
+	{
+		// Watch it come down; the logs lie where it fell.
+		if (Forest->IsDown(Tree))
+		{
+			const FTreeSpot& Spot = Forest->GetTrees()[Tree];
+			const FVector Dir = FRotator(0.f, Spot.FallYaw, 0.f).Vector();
+			for (int32 L = 0; L < Spot.Logs(); ++L)
+			{
+				const FVector At = Spot.Base() + Dir * (250.f + L * 260.f) + FVector(Dir.Y, -Dir.X, 0.f) * Rng.FRandRange(-60.f, 60.f);
+				Colony->SpawnItem(EItem::Log, 0, At, Spot.FallYaw + Rng.FRandRange(-10.f, 10.f));
+			}
+			bWaitingForFall = false;
+			Tree = INDEX_NONE;
+			Activity = EActivity::Resting;
+			Pause = 0.1f;
+		}
+		return;
+	}
+	WorkLeft -= GameHours;
+	if (WorkLeft > 0.f)
+	{
+		return;
+	}
+	switch (Activity)
+	{
+	case EActivity::Chopping:
+		Forest->Fell(Tree, GetActorLocation());
+		bWaitingForFall = true;
+		break;
+	case EActivity::Foraging:
+	{
+		FTreeSpot& Spot = Forest->GetTrees()[Tree];
+		Spot.Forage -= 1;
+		Spot.bClaimed = false;
+		Tree = INDEX_NONE;
+		CarryTo(Colony->SpawnItem(EItem::Nuts, 3, GetActorLocation(), GetActorRotation().Yaw));
+		break;
+	}
+	case EActivity::Fishing:
+	{
+		// Some days the fish bite, some days they don't.
+		const int32 Caught = Rng.RandRange(0, 3);
+		if (Caught == 0)
+		{
+			Colony->Say(FString::Printf(TEXT("%s fished a while and caught nothing."), *Info.Name));
+			Activity = EActivity::Resting;
+			Pause = 0.1f;
+		}
+		else
+		{
+			if (Caught == 3)
+			{
+				Colony->Say(FString::Printf(TEXT("%s had a good catch: three fish."), *Info.Name));
+			}
+			CarryTo(Colony->SpawnItem(EItem::Fish, Caught * 2, GetActorLocation(), GetActorRotation().Yaw));
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
 void AFounder::Live(float GameHours)
 {
 	if (!Colony)
@@ -253,33 +535,41 @@ void AFounder::Live(float GameHours)
 		return;
 	}
 
-	// Needs: hunger over a day, tiredness over a waking day, warmth toward what the air allows.
+	// Needs: hunger over a day, tiredness over a waking day (sooner when working), warmth
+	// toward what the air allows.
 	Food = FMath::Clamp(Food - GameHours / 24.f, 0.f, 1.f);
 	const bool bAsleep = Activity == EActivity::Sleeping && !bHasTarget;
-	Rest = FMath::Clamp(Rest + (bAsleep ? GameHours / 7.f : -GameHours / 17.f), 0.f, 1.f);
+	const bool bWorking = Activity == EActivity::Chopping || Activity == EActivity::Hauling
+		|| Activity == EActivity::Fishing || Activity == EActivity::Foraging;
+	Rest = FMath::Clamp(Rest + (bAsleep ? GameHours / 7.f : -GameHours / (bWorking ? 13.f : 17.f)), 0.f, 1.f);
 	const bool bByFire = FVector::Dist2D(GetActorLocation(), Colony->GetFire()) < 450.f;
 	const float WarmthHere = bByFire ? 1.f : FMath::Clamp((Colony->Temperature() - 4.f) / 14.f, 0.f, 1.f);
 	Warmth += (WarmthHere - Warmth) * FMath::Min(1.f, GameHours * (bByFire ? 1.5f : 0.5f));
 
-	// What needs doing most: sleep at night, eat at mealtimes, warm up when cold.
+	// What needs doing most: sleep at night, eat at mealtimes, warm up when cold. A tree
+	// already toppling is seen through first.
 	const int32 MealSlot = Colony->GetDay() * 2 + (Colony->GetHour() > 12.f ? 1 : 0);
 	EActivity Want = EActivity::Wandering;
-	if (Colony->IsNight())
+	if (!bWaitingForFall)
 	{
-		Want = EActivity::Sleeping;
-	}
-	else if (Colony->IsMealTime() && LastMealHour != MealSlot)
-	{
-		Want = EActivity::Eating;
-	}
-	else if (Warmth < 0.35f)
-	{
-		Want = EActivity::Warming;
+		if (Colony->IsNight())
+		{
+			Want = EActivity::Sleeping;
+		}
+		else if (Colony->IsMealTime() && LastMealHour != MealSlot)
+		{
+			Want = EActivity::Eating;
+		}
+		else if (Warmth < 0.35f)
+		{
+			Want = EActivity::Warming;
+		}
 	}
 
 	const bool bUrgent = Want != EActivity::Wandering;
 	if (bUrgent && Activity != Want)
 	{
+		LetGo();
 		Activity = Want;
 		TalkingWith = INDEX_NONE;
 		LieDown(false);
@@ -297,51 +587,41 @@ void AFounder::Live(float GameHours)
 		Pause = 0.f;
 	}
 
+	if (Carried)
+	{
+		// Logs ride on the shoulder; food is held in front.
+		const bool bLog = Carried->Type == EItem::Log;
+		const float Scale = GetActorScale3D().Z;
+		const FVector At = GetActorLocation() + FVector(0.f, 0.f, (bLog ? 150.f : 95.f) * Scale)
+			+ GetActorRightVector() * (bLog ? 18.f : 0.f) + GetActorForwardVector() * (bLog ? 0.f : 35.f);
+		Carried->SetActorLocationAndRotation(At, FRotator(0.f, GetActorRotation().Yaw + (bLog ? 0.f : 90.f), 0.f));
+	}
+
 	if (bHasTarget)
 	{
 		PlayAnim(WalkAnim, WalkSpeed / WalkAnimSpeed);
 		if (WalkTo(Target, GameHours))
 		{
 			bHasTarget = false;
-			PlayAnim(IdleAnim, 1.f);
-			if (Activity == EActivity::Sleeping)
-			{
-				// Face the fire, then lie down.
-				SetActorRotation(FRotator(0.f, (Colony->GetFire() - GetActorLocation()).Rotation().Yaw, 0.f));
-				LieDown(true);
-			}
-			else if (Activity == EActivity::Eating)
-			{
-				SetActorRotation(FRotator(0.f, (Colony->GetFire() - GetActorLocation()).Rotation().Yaw, 0.f));
-				if (Colony->TakeMeal())
-				{
-					Food = FMath::Min(1.f, Food + 0.5f);
-				}
-				LastMealHour = MealSlot;
-				Pause = 0.5f;
-			}
-			else if (Activity == EActivity::Warming)
-			{
-				SetActorRotation(FRotator(0.f, (Colony->GetFire() - GetActorLocation()).Rotation().Yaw, 0.f));
-			}
-			else if (Activity == EActivity::Talking && TalkingWith != INDEX_NONE)
-			{
-				const FVector Them = Colony->GetFounders()[TalkingWith]->GetActorLocation();
-				SetActorRotation(FRotator(0.f, (Them - GetActorLocation()).Rotation().Yaw, 0.f));
-				Pause = Rng.FRandRange(0.4f, 0.9f);
-			}
-			else
-			{
-				Pause = Rng.FRandRange(0.1f, 0.5f);
-			}
+			Arrive();
 		}
 		return;
 	}
 
 	PlayAnim(IdleAnim, 1.f);
+	if (bWaitingForFall || WorkLeft > 0.f)
+	{
+		Work(GameHours);
+		return;
+	}
 	Pause -= GameHours;
 	if (Pause <= 0.f && !bUrgent)
 	{
-		Choose();
+		const float H = Colony->GetHour();
+		const bool bWorkHours = H >= 8.f && H < 18.f;
+		if (!(bWorkHours && FindWork()))
+		{
+			Choose();
+		}
 	}
 }

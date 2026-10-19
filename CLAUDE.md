@@ -47,7 +47,9 @@ Detailed designs: `docs/resources.md` (materials, workshops, hauling, spoilage, 
 | Game code (camera, game mode, terrain function) | `Source/Aethelhold/` |
 | The founders: who they are, needs, what they do | `Founder.h/.cpp` (crowd-layer rules) |
 | Clock, stores, campfire, sun and moon | `Colony.h/.cpp` |
-| On-screen bar, name labels, founder card | `AethelHUD.h/.cpp` |
+| On-screen bar, name labels, founder card, news, tree marks | `AethelHUD.h/.cpp` |
+| Trees and shrubs, planted at game start; marking and felling | `Forest.h/.cpp` |
+| Logs, nuts, fish lying in the world; spoilage | `Item.h/.cpp` (stockpile in `Colony`) |
 | Editor tools called by scripts (landscape builder) | `Source/AethelholdEditor/` |
 | The founding map, built by script, never by hand | `Tools/build_valley.py` → `Content/Maps/Valley` |
 
@@ -60,7 +62,8 @@ powershell -File Unreal\Tools\shot.ps1 -Cam "X,Y,Yaw,Dist" -Out Unreal\Saved\sho
 ```
 
 - Camera: WASD pan, wheel zoom, Q/E or middle mouse turn, Shift faster. Click a founder, F
-  follows, Space pauses, 1 2 3 set speed. Test options: `-cam=X,Y,Yaw,Dist` (meters),
+  follows, Space pauses, 1 2 3 set speed, C then drag marks trees to fell. Test options:
+  `-cam=X,Y,Yaw,Dist` (meters), `-mark=N` (mark N trees near camp),
   `-hour=H`, `-speed=S`, `-select=N`; `shot.ps1 -Extra "..."` passes them.
 - The founders are Unreal's grey mannequin (`Content/Mannequin`, copied from the engine's
   templates) until real characters are chosen.

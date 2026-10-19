@@ -1,5 +1,7 @@
 #include "Colony.h"
 #include "Founder.h"
+#include "Forest.h"
+#include "Item.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/LightComponent.h"
@@ -63,8 +65,31 @@ void AColony::BeginPlay()
 	{
 		SetSpeed(StartSpeed);
 	}
+	// The woods grow from the land as the game starts.
+	Forest = GetWorld()->SpawnActor<AForest>();
+	Forest->Plant(Terrain, Seed);
 	FoundTheColony();
 	UpdateSun();
+
+	// For testing: -mark=N marks the N trees nearest the camp for felling.
+	int32 ToMark = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("-mark="), ToMark))
+	{
+		TArray<FTreeSpot>& Trees = Forest->GetTrees();
+		TArray<int32> Order;
+		for (int32 I = 0; I < Trees.Num(); ++I)
+		{
+			if (!Trees[I].IsShrub())
+			{
+				Order.Add(I);
+			}
+		}
+		Order.Sort([&](int32 A, int32 B) { return FVector::DistSquared2D(Trees[A].Base(), Fire) < FVector::DistSquared2D(Trees[B].Base(), Fire); });
+		for (int32 K = 0; K < FMath::Min(ToMark, Order.Num()); ++K)
+		{
+			Trees[Order[K]].bMarked = true;
+		}
+	}
 }
 
 FVector AColony::OnGround(float X, float Y) const
@@ -91,6 +116,8 @@ void AColony::FoundTheColony()
 	const FVector2D Start = Terrain.StartSpot();
 	// The fire goes a little back from the river, on dry flat ground.
 	Fire = OnGround(Start.X * 100.f + 1500.f, Start.Y * 100.f);
+	// The stockpile is a few steps further back from the water.
+	Stockpile = OnGround(Fire.X + 900.f, Fire.Y - 300.f);
 	BuildCampfire();
 
 	// Seven founders: a family with a child, a young couple, an old widower and a youth.
@@ -205,14 +232,140 @@ void AColony::TogglePause()
 	SetSpeed(Speed == 0 ? SpeedBeforePause : 0);
 }
 
+int32 AColony::GetFood() const
+{
+	int32 Total = FoodPortions;
+	for (const AItem* Item : Items)
+	{
+		if (Item->bStored && Item->IsFood())
+		{
+			Total += Item->Portions;
+		}
+	}
+	return Total;
+}
+
+int32 AColony::CountStored(EItem Type) const
+{
+	int32 Count = 0;
+	for (const AItem* Item : Items)
+	{
+		Count += Item->bStored && Item->Type == Type ? 1 : 0;
+	}
+	return Count;
+}
+
 bool AColony::TakeMeal()
 {
+	// Fresh food first, whatever will spoil soonest, then the rations they brought.
+	AItem* Soonest = nullptr;
+	for (AItem* Item : Items)
+	{
+		if (Item->bStored && Item->IsFood() && Item->Portions > 0 && (!Soonest || Item->HoursLeft < Soonest->HoursLeft))
+		{
+			Soonest = Item;
+		}
+	}
+	if (Soonest)
+	{
+		if (--Soonest->Portions <= 0)
+		{
+			Items.Remove(Soonest);
+			Soonest->Destroy();
+		}
+		return true;
+	}
 	if (FoodPortions <= 0)
 	{
 		return false;
 	}
 	--FoodPortions;
 	return true;
+}
+
+AItem* AColony::SpawnItem(EItem Type, int32 Portions, const FVector& At, float Yaw)
+{
+	AItem* Item = GetWorld()->SpawnActor<AItem>(OnGround(At.X, At.Y) + FVector(0.f, 0.f, 13.f), FRotator(0.f, Yaw, 0.f));
+	Item->Init(Type, Portions);
+	Items.Add(Item);
+	return Item;
+}
+
+AItem* AColony::LooseItemNear(const FVector& From, float Range) const
+{
+	AItem* Best = nullptr;
+	float BestDist = Range * Range;
+	for (AItem* Item : Items)
+	{
+		if (!Item->bStored && !Item->bClaimed)
+		{
+			const float D = FVector::DistSquared2D(From, Item->GetActorLocation());
+			if (D < BestDist)
+			{
+				BestDist = D;
+				Best = Item;
+			}
+		}
+	}
+	return Best;
+}
+
+FVector AColony::StockSpot(EItem Type) const
+{
+	// Logs are stacked in a pile, five to a layer; food is set out in rows beside them.
+	const int32 N = Type == EItem::Log ? CountStored(EItem::Log) : CountStored(EItem::Nuts) + CountStored(EItem::Fish);
+	if (Type == EItem::Log)
+	{
+		return Stockpile + FVector(0.f, (N % 5) * 28.f - 56.f, 13.f + (N / 5) * 24.f);
+	}
+	return Stockpile + FVector(-150.f - (N / 6) * 55.f, (N % 6) * 55.f - 140.f, 13.f);
+}
+
+void AColony::Store(AItem* Item)
+{
+	Item->SetActorLocation(StockSpot(Item->Type));
+	Item->SetActorRotation(FRotator(0.f, Item->Type == EItem::Log ? 0.f : 30.f, 0.f));
+	Item->bStored = true;
+	Item->bClaimed = false;
+}
+
+void AColony::Drop(AItem* Item, const FVector& At)
+{
+	Item->SetActorLocation(OnGround(At.X, At.Y) + FVector(0.f, 0.f, 13.f));
+	Item->bClaimed = false;
+}
+
+void AColony::Say(const FString& Text)
+{
+	News.Add({ Text, GetClock() });
+	if (News.Num() > 30)
+	{
+		News.RemoveAt(0);
+	}
+}
+
+void AColony::Spoil(float GameHours)
+{
+	int32 Rotted = 0;
+	for (int32 I = Items.Num() - 1; I >= 0; --I)
+	{
+		AItem* Item = Items[I];
+		if (Item->HoursLeft < 0.f || Item->bClaimed)
+		{
+			continue;
+		}
+		Item->HoursLeft -= GameHours;
+		if (Item->HoursLeft <= 0.f)
+		{
+			Rotted += Item->Portions;
+			Items.RemoveAt(I);
+			Item->Destroy();
+		}
+	}
+	if (Rotted > 0)
+	{
+		Say(FString::Printf(TEXT("Food has gone bad: %d meals thrown away."), Rotted));
+	}
 }
 
 void AColony::UpdateSun()
@@ -253,6 +406,7 @@ void AColony::Tick(float DeltaSeconds)
 	const float Flicker = 0.85f + 0.1f * FMath::Sin(FlickerTime * 13.f) + 0.05f * FMath::Sin(FlickerTime * 31.f + 1.3f);
 	FireLight->SetIntensity((IsNight() ? 45.f : 20.f) * Flicker);
 
+	Spoil(GameHours);
 	for (AFounder* Founder : Founders)
 	{
 		Founder->Live(GameHours);

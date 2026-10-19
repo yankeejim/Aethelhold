@@ -1,6 +1,8 @@
 #include "AethelHUD.h"
 #include "Colony.h"
 #include "Founder.h"
+#include "Forest.h"
+#include "Item.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -87,8 +89,10 @@ void AAethelHUD::DrawHUD()
 		Selected = C->GetFounders()[Pick];
 	}
 	bPicked = true;
+	DrawMarks(C);
 	DrawNames(C);
 	DrawTopBar(C);
+	DrawNews(C);
 	if (AFounder* F = Selected.Get())
 	{
 		DrawCard(F);
@@ -101,15 +105,83 @@ void AAethelHUD::DrawTopBar(AColony* C)
 	const int32 H = FMath::FloorToInt(C->GetHour());
 	const int32 M = FMath::FloorToInt((C->GetHour() - H) * 60.f);
 	const FString SpeedText = C->GetSpeed() == 0 ? TEXT("Paused") : FString::Printf(TEXT("Speed x%d"), C->GetSpeed());
-	const FString Line = FString::Printf(TEXT("Day %d   %s   %02d:%02d   %.0f°C   Food %d portions   %s"),
-		C->GetDay(), *C->SeasonName(), H, M, C->Temperature(), C->GetFood(), *SpeedText);
+	const FString Line = FString::Printf(TEXT("Day %d   %s   %02d:%02d   %.0f°C      Food %d meals (%d rations, %d nuts, %d fish)   Wood %d logs      %s"),
+		C->GetDay(), *C->SeasonName(), H, M, C->Temperature(), C->GetFood(), C->GetRations(),
+		C->CountStored(EItem::Nuts), C->CountStored(EItem::Fish), C->CountStored(EItem::Log), *SpeedText);
 
 	DrawRect(Panel, 0.f, 0.f, Canvas->SizeX, 40.f);
 	DrawText(Line, Ink, 20.f, 10.f, Font, 1.25f);
-	const FString Help = TEXT("Space pause   1 2 3 speed   Click a founder   F follow");
+	const FString Help = TEXT("Space pause   1 2 3 speed   Click a founder   F follow   C mark trees");
 	float W, Hh;
 	GetTextSize(Help, W, Hh, Font, 1.f);
 	DrawText(Help, Dim, Canvas->SizeX - W - 20.f, 12.f, Font, 1.f);
+}
+
+void AAethelHUD::DrawMarks(AColony* C)
+{
+	// Marked trees carry a small orange tag at chest height, when the camera is near enough.
+	const APlayerController* PC = GetOwningPlayerController();
+	FVector CamLoc;
+	FRotator CamRot;
+	PC->GetPlayerViewPoint(CamLoc, CamRot);
+	const FLinearColor Mark(1.f, 0.55f, 0.15f, 0.9f);
+	for (const FTreeSpot& Spot : C->GetForest()->GetTrees())
+	{
+		if (!Spot.bMarked || Spot.bGone || Spot.Fall > 0.f || FVector::DistSquared(CamLoc, Spot.Base()) > FMath::Square(40000.f))
+		{
+			continue;
+		}
+		const FVector Screen = Project(Spot.Base() + FVector(0.f, 0.f, 150.f));
+		if (Screen.Z > 0.f)
+		{
+			DrawRect(Mark, Screen.X - 4.f, Screen.Y - 4.f, 8.f, 8.f);
+		}
+	}
+
+	if (C->IsMarkingTrees())
+	{
+		UFont* Font = GEngine->GetMediumFont();
+		const FString Text = TEXT("Marking trees to fell: drag across them (hold Shift to unmark).   C when done");
+		float W, H;
+		GetTextSize(Text, W, H, Font, 1.2f);
+		DrawRect(FLinearColor(0.35f, 0.15f, 0.02f, 0.75f), (Canvas->SizeX - W) * 0.5f - 16.f, 52.f, W + 32.f, H + 12.f);
+		DrawText(Text, Ink, (Canvas->SizeX - W) * 0.5f, 58.f, Font, 1.2f);
+	}
+	float MX, MY;
+	if (bDragging && PC->GetMousePosition(MX, MY))
+	{
+		const float X0 = FMath::Min(DragFrom.X, MX), Y0 = FMath::Min(DragFrom.Y, MY);
+		const float W = FMath::Abs(MX - DragFrom.X), H = FMath::Abs(MY - DragFrom.Y);
+		DrawRect(FLinearColor(1.f, 0.55f, 0.15f, 0.15f), X0, Y0, W, H);
+		DrawLine(X0, Y0, X0 + W, Y0, Mark, 2.f);
+		DrawLine(X0, Y0 + H, X0 + W, Y0 + H, Mark, 2.f);
+		DrawLine(X0, Y0, X0, Y0 + H, Mark, 2.f);
+		DrawLine(X0 + W, Y0, X0 + W, Y0 + H, Mark, 2.f);
+	}
+}
+
+void AAethelHUD::DrawNews(AColony* C)
+{
+	// The last few things that happened, fading after a few game hours.
+	UFont* Font = GEngine->GetSmallFont();
+	const TArray<AColony::FNews>& News = C->GetNews();
+	float Y = Canvas->SizeY - 30.f;
+	int32 Shown = 0;
+	for (int32 I = News.Num() - 1; I >= 0 && Shown < 6; --I)
+	{
+		const float Age = C->GetClock() - News[I].When;
+		if (Age > 4.f)
+		{
+			break;
+		}
+		const float Alpha = FMath::Clamp(4.f - Age, 0.f, 1.f);
+		float W, H;
+		GetTextSize(News[I].Text, W, H, Font, 1.15f);
+		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.45f * Alpha), Canvas->SizeX - W - 36.f, Y - 3.f, W + 16.f, H + 6.f);
+		DrawText(News[I].Text, FLinearColor(Ink.R, Ink.G, Ink.B, Alpha), Canvas->SizeX - W - 28.f, Y, Font, 1.15f);
+		Y -= H + 10.f;
+		++Shown;
+	}
 }
 
 void AAethelHUD::DrawNames(AColony* C)
