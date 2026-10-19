@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Storage.h"
 #include "ValleyTerrain.h"
 #include "Colony.generated.h"
 
@@ -58,19 +59,35 @@ public:
 	/** Takes one meal from the stores, the food closest to spoiling first; false when empty. */
 	bool TakeMeal();
 
-	// --- items and the stockpile ---
+	// --- items ---
 	AItem* SpawnItem(EItem Type, int32 Portions, const FVector& At, float Yaw);
-	/** The nearest item lying loose (not stored, not claimed) within range of a point. */
+	/** The nearest item lying loose (not stored, not claimed) within range of a point, that some
+	 *  stockpile has room for. */
 	AItem* LooseItemNear(const FVector& From, float Range) const;
-	/** Where in the stockpile the next item of this kind goes. */
-	FVector StockSpot(EItem Type) const;
-	FVector GetStockpile() const { return Stockpile; }
-	void Store(AItem* Item);
 	void Drop(AItem* Item, const FVector& At);
 
-	// --- what the player has told them ---
-	bool IsMarkingTrees() const { return bMarkingTrees; }
-	void SetMarkingTrees(bool bOn) { bMarkingTrees = bOn; }
+	// --- stockpiles (Storage.h) ---
+	/** Reserves room for an item in the nearest stockpile that takes it; invalid when full. */
+	FStoreSpot Reserve(EItem Kind, const FVector& From);
+	void Unreserve(const FStoreSpot& Spot);
+	bool HasRoomFor(EItem Kind) const;
+	FVector SpotLocation(const FStoreSpot& Spot, EItem Kind) const;
+	void Store(AItem* Item, const FStoreSpot& Spot);
+	/** Draws a new stockpile over a rectangle (world cm); returns how many places it got. */
+	int32 AddZone(const FVector2D& A, const FVector2D& B);
+	/** Removes stockpiles under a rectangle; what lay in them is left loose. */
+	int32 RemoveZones(const FVector2D& A, const FVector2D& B);
+	/** Changes what the stockpile under a point takes; false when there is none. */
+	bool CycleZone(const FVector2D& At);
+	const TArray<FStoreZone>& GetZones() const { return Zones; }
+	const FStorePlace* FindPlace(const FIntPoint& Place) const { return Places.Find(Place); }
+	FVector PlaceCenter(const FIntPoint& Place) const;
+
+	// --- what the player is doing ---
+	enum class EOrder : uint8 { None, MarkTrees, Stockpiles };
+	EOrder GetOrder() const { return Order; }
+	void ToggleOrder(EOrder O) { Order = Order == O ? EOrder::None : O; }
+	bool IsMarkingTrees() const { return Order == EOrder::MarkTrees; }
 
 	// --- news, as the founders would tell it ---
 	void Say(const FString& Text);
@@ -88,6 +105,10 @@ private:
 	void BuildCampfire();
 	void UpdateSun();
 	void Spoil(float GameHours);
+	/** Takes an item out of its stockpile place (eaten, rotted or its stockpile removed). */
+	void Unstore(AItem* Item);
+	/** How fast food rots here and now: 1 is the usual pace in the open. */
+	float SpoilRate(const AItem* Item) const;
 
 	FValleyTerrain Terrain{ 1 };
 	FVector Fire = FVector::ZeroVector;
@@ -101,8 +122,9 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<AItem>> Items;
 
-	FVector Stockpile = FVector::ZeroVector;
-	bool bMarkingTrees = false;
+	TArray<FStoreZone> Zones;
+	TMap<FIntPoint, FStorePlace> Places;
+	EOrder Order = EOrder::None;
 	TArray<FNews> News;
 
 	UPROPERTY()

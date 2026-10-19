@@ -112,6 +112,7 @@ void AStewardCamera::BuildInput()
 	SpeedActions[2] = Button(EKeys::Three);
 	FollowAction = Button(EKeys::F);
 	MarkAction = Button(EKeys::C);
+	StockpileAction = Button(EKeys::Z);
 }
 
 void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -140,6 +141,7 @@ void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(SpeedActions[2], ETriggerEvent::Started, this, &AStewardCamera::OnSpeed3);
 		EIC->BindAction(FollowAction, ETriggerEvent::Started, this, &AStewardCamera::OnFollow);
 		EIC->BindAction(MarkAction, ETriggerEvent::Started, this, &AStewardCamera::OnMarkTrees);
+		EIC->BindAction(StockpileAction, ETriggerEvent::Started, this, &AStewardCamera::OnStockpiles);
 		EIC->BindAction(SelectAction, ETriggerEvent::Completed, this, &AStewardCamera::OnSelectReleased);
 	}
 }
@@ -183,9 +185,9 @@ void AStewardCamera::OnSelect()
 	{
 		return;
 	}
-	// Marking trees: press, drag across them, let go.
+	// Marking trees or drawing stockpiles: press, drag across the ground, let go.
 	AColony* C = GetColony();
-	if (C && C->IsMarkingTrees())
+	if (C && C->GetOrder() != AColony::EOrder::None)
 	{
 		bDragging = GroundUnderCursor(DragStart);
 		float X, Y;
@@ -223,14 +225,37 @@ void AStewardCamera::OnSelectReleased()
 	{
 		return;
 	}
-	// A click marks the trees around that spot; a drag marks everything inside. Shift unmarks.
 	FVector2D A(DragStart), B(End);
+	const bool bShift = PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift);
+	const bool bClick = FVector2D::Distance(A, B) < 150.f;
+	if (C->GetOrder() == AColony::EOrder::Stockpiles)
+	{
+		// A click on a stockpile changes what it takes; a drag draws a new one; Shift removes.
+		if (bShift)
+		{
+			const int32 Gone = C->RemoveZones(A, B);
+			if (Gone > 0)
+			{
+				C->Say(FString::Printf(TEXT("Stockpile cleared away (%d places)."), Gone));
+			}
+		}
+		else if (!(bClick && C->CycleZone(A)))
+		{
+			const int32 Made = C->AddZone(A, B);
+			if (Made > 0)
+			{
+				C->Say(FString::Printf(TEXT("New stockpile: room on %d places of ground."), Made));
+			}
+		}
+		return;
+	}
+	// A click marks the trees around that spot; a drag marks everything inside. Shift unmarks.
 	if (FVector2D::Distance(A, B) < 300.f)
 	{
 		A -= FVector2D(400.f);
 		B += FVector2D(400.f);
 	}
-	const bool bUnmark = PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift);
+	const bool bUnmark = bShift;
 	const int32 Count = C->GetForest()->MarkArea(A, B, !bUnmark);
 	if (Count > 0)
 	{
@@ -243,7 +268,15 @@ void AStewardCamera::OnMarkTrees()
 {
 	if (AColony* C = GetColony())
 	{
-		C->SetMarkingTrees(!C->IsMarkingTrees());
+		C->ToggleOrder(AColony::EOrder::MarkTrees);
+	}
+}
+
+void AStewardCamera::OnStockpiles()
+{
+	if (AColony* C = GetColony())
+	{
+		C->ToggleOrder(AColony::EOrder::Stockpiles);
 	}
 }
 

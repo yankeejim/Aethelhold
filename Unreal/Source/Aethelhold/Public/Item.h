@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Storage.h"
 #include "Item.generated.h"
 
 class UStaticMeshComponent;
@@ -28,8 +29,9 @@ public:
 	int32 Portions = 0;
 	/** Game hours before it rots; negative for things that keep. */
 	float HoursLeft = -1.f;
-	/** Lying in the stockpile (rather than where it was made or dropped). */
+	/** Lying in a stockpile (rather than where it was made or dropped), and where. */
 	bool bStored = false;
+	FStoreSpot Spot;
 	/** Someone is on their way to fetch it, or carrying it. */
 	bool bClaimed = false;
 

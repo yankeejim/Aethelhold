@@ -31,6 +31,7 @@ private:
 	void DrawCard(AFounder* Founder);
 	void Bar(float X, float Y, const FString& Label, float Value);
 	void DrawMarks(AColony* Colony);
+	void DrawZones(AColony* Colony);
 	void DrawNews(AColony* Colony);
 
 	TWeakObjectPtr<AColony> Colony;

@@ -71,23 +71,30 @@ void AColony::BeginPlay()
 	FoundTheColony();
 	UpdateSun();
 
+	// For testing: -order=1 starts marking trees, -order=2 laying out stockpiles.
+	int32 StartOrder = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("-order="), StartOrder))
+	{
+		Order = static_cast<EOrder>(FMath::Clamp(StartOrder, 0, 2));
+	}
+
 	// For testing: -mark=N marks the N trees nearest the camp for felling.
 	int32 ToMark = 0;
 	if (FParse::Value(FCommandLine::Get(), TEXT("-mark="), ToMark))
 	{
 		TArray<FTreeSpot>& Trees = Forest->GetTrees();
-		TArray<int32> Order;
+		TArray<int32> Nearest;
 		for (int32 I = 0; I < Trees.Num(); ++I)
 		{
 			if (!Trees[I].IsShrub())
 			{
-				Order.Add(I);
+				Nearest.Add(I);
 			}
 		}
-		Order.Sort([&](int32 A, int32 B) { return FVector::DistSquared2D(Trees[A].Base(), Fire) < FVector::DistSquared2D(Trees[B].Base(), Fire); });
-		for (int32 K = 0; K < FMath::Min(ToMark, Order.Num()); ++K)
+		Nearest.Sort([&](int32 A, int32 B) { return FVector::DistSquared2D(Trees[A].Base(), Fire) < FVector::DistSquared2D(Trees[B].Base(), Fire); });
+		for (int32 K = 0; K < FMath::Min(ToMark, Nearest.Num()); ++K)
 		{
-			Trees[Order[K]].bMarked = true;
+			Trees[Nearest[K]].bMarked = true;
 		}
 	}
 }
@@ -116,9 +123,9 @@ void AColony::FoundTheColony()
 	const FVector2D Start = Terrain.StartSpot();
 	// The fire goes a little back from the river, on dry flat ground.
 	Fire = OnGround(Start.X * 100.f + 1500.f, Start.Y * 100.f);
-	// The stockpile is a few steps further back from the water.
-	Stockpile = OnGround(Fire.X + 900.f, Fire.Y - 300.f);
 	BuildCampfire();
+	// They set their packs down a few steps back from the fire: the first stockpile.
+	AddZone(FVector2D(Fire.X + 600.f, Fire.Y - 600.f), FVector2D(Fire.X + 1100.f, Fire.Y - 100.f));
 
 	// Seven founders: a family with a child, a young couple, an old widower and a youth.
 	TSet<FString> UsedNames;
@@ -270,6 +277,7 @@ bool AColony::TakeMeal()
 	{
 		if (--Soonest->Portions <= 0)
 		{
+			Unstore(Soonest);
 			Items.Remove(Soonest);
 			Soonest->Destroy();
 		}
@@ -297,7 +305,7 @@ AItem* AColony::LooseItemNear(const FVector& From, float Range) const
 	float BestDist = Range * Range;
 	for (AItem* Item : Items)
 	{
-		if (!Item->bStored && !Item->bClaimed)
+		if (!Item->bStored && !Item->bClaimed && HasRoomFor(Item->Type))
 		{
 			const float D = FVector::DistSquared2D(From, Item->GetActorLocation());
 			if (D < BestDist)
@@ -310,29 +318,214 @@ AItem* AColony::LooseItemNear(const FVector& From, float Range) const
 	return Best;
 }
 
-FVector AColony::StockSpot(EItem Type) const
-{
-	// Logs are stacked in a pile, five to a layer; food is set out in rows beside them.
-	const int32 N = Type == EItem::Log ? CountStored(EItem::Log) : CountStored(EItem::Nuts) + CountStored(EItem::Fish);
-	if (Type == EItem::Log)
-	{
-		return Stockpile + FVector(0.f, (N % 5) * 28.f - 56.f, 13.f + (N / 5) * 24.f);
-	}
-	return Stockpile + FVector(-150.f - (N / 6) * 55.f, (N % 6) * 55.f - 140.f, 13.f);
-}
-
-void AColony::Store(AItem* Item)
-{
-	Item->SetActorLocation(StockSpot(Item->Type));
-	Item->SetActorRotation(FRotator(0.f, Item->Type == EItem::Log ? 0.f : 30.f, 0.f));
-	Item->bStored = true;
-	Item->bClaimed = false;
-}
-
 void AColony::Drop(AItem* Item, const FVector& At)
 {
 	Item->SetActorLocation(OnGround(At.X, At.Y) + FVector(0.f, 0.f, 13.f));
 	Item->bClaimed = false;
+}
+
+// --- stockpiles ---
+
+FVector AColony::PlaceCenter(const FIntPoint& Place) const
+{
+	return OnGround((Place.X + 0.5f) * Storage::PlaceSize, (Place.Y + 0.5f) * Storage::PlaceSize);
+}
+
+FStoreSpot AColony::Reserve(EItem Kind, const FVector& From)
+{
+	// The nearest place that takes this kind and has a free slot: one already holding the same
+	// kind, or an empty one.
+	FStoreSpot Best;
+	float BestDist = TNumericLimits<float>::Max();
+	for (TPair<FIntPoint, FStorePlace>& Pair : Places)
+	{
+		FStorePlace& Place = Pair.Value;
+		if (!Zones[Place.Zone].Takes(Kind) || (Place.Kind.IsSet() && Place.Kind.GetValue() != Kind && !Place.IsEmpty()))
+		{
+			continue;
+		}
+		const float D = FVector::DistSquared2D(From, PlaceCenter(Pair.Key));
+		if (D >= BestDist)
+		{
+			continue;
+		}
+		for (int32 S = 0; S < Storage::Capacity(Kind); ++S)
+		{
+			const bool bTaken = Place.Slots.IsValidIndex(S) && (Place.Slots[S].IsValid() || Place.Reserved[S]);
+			if (!bTaken)
+			{
+				Best.Place = Pair.Key;
+				Best.Slot = S;
+				BestDist = D;
+				break;
+			}
+		}
+	}
+	if (Best.IsValid())
+	{
+		FStorePlace& Place = Places[Best.Place];
+		if (Place.IsEmpty())
+		{
+			Place.Kind = Kind;
+		}
+		Place.Slots.SetNum(FMath::Max(Place.Slots.Num(), Storage::Capacity(Kind)));
+		Place.Reserved.SetNum(Place.Slots.Num());
+		Place.Reserved[Best.Slot] = true;
+	}
+	return Best;
+}
+
+void AColony::Unreserve(const FStoreSpot& Spot)
+{
+	if (FStorePlace* Place = Places.Find(Spot.Place))
+	{
+		if (Place->Reserved.IsValidIndex(Spot.Slot))
+		{
+			Place->Reserved[Spot.Slot] = false;
+		}
+	}
+}
+
+bool AColony::HasRoomFor(EItem Kind) const
+{
+	for (const TPair<FIntPoint, FStorePlace>& Pair : Places)
+	{
+		const FStorePlace& Place = Pair.Value;
+		if (!Zones[Place.Zone].Takes(Kind))
+		{
+			continue;
+		}
+		if (Place.IsEmpty())
+		{
+			return true;
+		}
+		if (Place.Kind.IsSet() && Place.Kind.GetValue() == Kind)
+		{
+			for (int32 S = 0; S < Storage::Capacity(Kind); ++S)
+			{
+				if (!Place.Slots.IsValidIndex(S) || (!Place.Slots[S].IsValid() && !Place.Reserved[S]))
+				{
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+FVector AColony::SpotLocation(const FStoreSpot& Spot, EItem Kind) const
+{
+	return PlaceCenter(Spot.Place) + Storage::SlotOffset(Kind, Spot.Slot);
+}
+
+void AColony::Store(AItem* Item, const FStoreSpot& Spot)
+{
+	FStorePlace* Place = Places.Find(Spot.Place);
+	if (!Place || !Place->Slots.IsValidIndex(Spot.Slot))
+	{
+		// The stockpile was taken away while it was being carried.
+		Drop(Item, Item->GetActorLocation());
+		return;
+	}
+	Place->Reserved[Spot.Slot] = false;
+	Place->Slots[Spot.Slot] = Item;
+	Item->SetActorLocation(SpotLocation(Spot, Item->Type));
+	Item->SetActorRotation(FRotator(0.f, Item->Type == EItem::Log ? 0.f : 30.f, 0.f));
+	Item->bStored = true;
+	Item->bClaimed = false;
+	Item->Spot = Spot;
+}
+
+void AColony::Unstore(AItem* Item)
+{
+	if (!Item->bStored)
+	{
+		return;
+	}
+	if (FStorePlace* Place = Places.Find(Item->Spot.Place))
+	{
+		if (Place->Slots.IsValidIndex(Item->Spot.Slot))
+		{
+			Place->Slots[Item->Spot.Slot] = nullptr;
+		}
+	}
+	Item->bStored = false;
+	Item->Spot = FStoreSpot();
+}
+
+int32 AColony::AddZone(const FVector2D& A, const FVector2D& B)
+{
+	const FIntPoint Lo = Storage::PlaceAt(FVector2D(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y)));
+	const FIntPoint Hi = Storage::PlaceAt(FVector2D(FMath::Max(A.X, B.X), FMath::Max(A.Y, B.Y)));
+	FStoreZone Zone;
+	for (int32 X = Lo.X; X <= Hi.X; ++X)
+	{
+		for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+		{
+			const FIntPoint P(X, Y);
+			// Not in the river or on a steep bank, and not where another stockpile already is.
+			if (!Places.Contains(P) && IsDryLand(PlaceCenter(P)))
+			{
+				Zone.Places.Add(P);
+			}
+		}
+	}
+	if (Zone.Places.IsEmpty())
+	{
+		return 0;
+	}
+	const int32 Index = Zones.Add(Zone);
+	for (const FIntPoint& P : Zone.Places)
+	{
+		Places.Add(P).Zone = Index;
+	}
+	return Zone.Places.Num();
+}
+
+int32 AColony::RemoveZones(const FVector2D& A, const FVector2D& B)
+{
+	const FIntPoint Lo = Storage::PlaceAt(FVector2D(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y)));
+	const FIntPoint Hi = Storage::PlaceAt(FVector2D(FMath::Max(A.X, B.X), FMath::Max(A.Y, B.Y)));
+	int32 Removed = 0;
+	for (int32 X = Lo.X; X <= Hi.X; ++X)
+	{
+		for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+		{
+			const FIntPoint P(X, Y);
+			FStorePlace* Place = Places.Find(P);
+			if (!Place)
+			{
+				continue;
+			}
+			// Whatever lay there stays where it is, loose, to be carried somewhere else.
+			for (const TWeakObjectPtr<AItem>& Item : Place->Slots)
+			{
+				if (Item.IsValid())
+				{
+					Item->bStored = false;
+					Item->Spot = FStoreSpot();
+				}
+			}
+			FStoreZone& Zone = Zones[Place->Zone];
+			Zone.Places.Remove(P);
+			Zone.bRemoved = Zone.Places.IsEmpty();
+			Places.Remove(P);
+			++Removed;
+		}
+	}
+	return Removed;
+}
+
+bool AColony::CycleZone(const FVector2D& At)
+{
+	const FStorePlace* Place = Places.Find(Storage::PlaceAt(At));
+	if (!Place)
+	{
+		return false;
+	}
+	FStoreZone& Zone = Zones[Place->Zone];
+	Zone.Accepts = static_cast<EStoreFilter>(((int32)Zone.Accepts + 1) % 3);
+	return true;
 }
 
 void AColony::Say(const FString& Text)
@@ -342,6 +535,15 @@ void AColony::Say(const FString& Text)
 	{
 		News.RemoveAt(0);
 	}
+}
+
+float AColony::SpoilRate(const AItem* Item) const
+{
+	// Food lies in the open for now: heat speeds the rot and cold slows it right down. Storage
+	// buildings, when they come, slow it further.
+	const float T = Temperature();
+	const float Heat = T > 12.f ? 1.f + (T - 12.f) * 0.08f : FMath::GetMappedRangeValueClamped(FVector2D(12.f, 2.f), FVector2D(1.f, 0.3f), T);
+	return Heat;
 }
 
 void AColony::Spoil(float GameHours)
@@ -354,10 +556,11 @@ void AColony::Spoil(float GameHours)
 		{
 			continue;
 		}
-		Item->HoursLeft -= GameHours;
+		Item->HoursLeft -= GameHours * SpoilRate(Item);
 		if (Item->HoursLeft <= 0.f)
 		{
 			Rotted += Item->Portions;
+			Unstore(Item);
 			Items.RemoveAt(I);
 			Item->Destroy();
 		}

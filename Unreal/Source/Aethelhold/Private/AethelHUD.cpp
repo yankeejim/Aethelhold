@@ -89,6 +89,7 @@ void AAethelHUD::DrawHUD()
 		Selected = C->GetFounders()[Pick];
 	}
 	bPicked = true;
+	DrawZones(C);
 	DrawMarks(C);
 	DrawNames(C);
 	DrawTopBar(C);
@@ -111,7 +112,7 @@ void AAethelHUD::DrawTopBar(AColony* C)
 
 	DrawRect(Panel, 0.f, 0.f, Canvas->SizeX, 40.f);
 	DrawText(Line, Ink, 20.f, 10.f, Font, 1.25f);
-	const FString Help = TEXT("Space pause   1 2 3 speed   Click a founder   F follow   C mark trees");
+	const FString Help = TEXT("Space pause   1 2 3 speed   Click a founder   F follow   C mark trees   Z stockpiles");
 	float W, Hh;
 	GetTextSize(Help, W, Hh, Font, 1.f);
 	DrawText(Help, Dim, Canvas->SizeX - W - 20.f, 12.f, Font, 1.f);
@@ -138,10 +139,12 @@ void AAethelHUD::DrawMarks(AColony* C)
 		}
 	}
 
-	if (C->IsMarkingTrees())
+	if (C->GetOrder() != AColony::EOrder::None)
 	{
 		UFont* Font = GEngine->GetMediumFont();
-		const FString Text = TEXT("Marking trees to fell: drag across them (hold Shift to unmark).   C when done");
+		const FString Text = C->IsMarkingTrees()
+			? TEXT("Marking trees to fell: drag across them (hold Shift to unmark).   C when done")
+			: TEXT("Stockpiles: drag to lay one out, click one to change what it takes, Shift-drag to clear.   Z when done");
 		float W, H;
 		GetTextSize(Text, W, H, Font, 1.2f);
 		DrawRect(FLinearColor(0.35f, 0.15f, 0.02f, 0.75f), (Canvas->SizeX - W) * 0.5f - 16.f, 52.f, W + 32.f, H + 12.f);
@@ -157,6 +160,76 @@ void AAethelHUD::DrawMarks(AColony* C)
 		DrawLine(X0, Y0 + H, X0 + W, Y0 + H, Mark, 2.f);
 		DrawLine(X0, Y0, X0, Y0 + H, Mark, 2.f);
 		DrawLine(X0 + W, Y0, X0 + W, Y0 + H, Mark, 2.f);
+	}
+}
+
+void AAethelHUD::DrawZones(AColony* C)
+{
+	// Each stockpile is outlined on the ground, coloured by what it takes, with a label.
+	const APlayerController* PC = GetOwningPlayerController();
+	FVector CamLoc;
+	FRotator CamRot;
+	PC->GetPlayerViewPoint(CamLoc, CamRot);
+	const bool bEditing = C->GetOrder() == AColony::EOrder::Stockpiles;
+	UFont* Font = GEngine->GetSmallFont();
+	const float H = Storage::PlaceSize * 0.5f - 6.f;
+
+	for (const FStoreZone& Zone : C->GetZones())
+	{
+		if (Zone.bRemoved)
+		{
+			continue;
+		}
+		const FLinearColor Color = Zone.Accepts == EStoreFilter::Wood ? FLinearColor(0.95f, 0.6f, 0.25f, bEditing ? 0.9f : 0.5f)
+			: Zone.Accepts == EStoreFilter::Food ? FLinearColor(0.5f, 0.9f, 0.35f, bEditing ? 0.9f : 0.5f)
+			: FLinearColor(0.95f, 0.9f, 0.75f, bEditing ? 0.9f : 0.45f);
+		FVector Middle = FVector::ZeroVector;
+		int32 Stored = 0;
+		bool bNear = false;
+		for (const FIntPoint& P : Zone.Places)
+		{
+			const FVector Centre = C->PlaceCenter(P) + FVector(0.f, 0.f, 8.f);
+			Middle += Centre;
+			if (const FStorePlace* Place = C->FindPlace(P))
+			{
+				Stored += Place->Count();
+			}
+			if (FVector::DistSquared(CamLoc, Centre) > FMath::Square(30000.f))
+			{
+				continue;
+			}
+			bNear = true;
+			const FVector Corners[4] = { Centre + FVector(-H, -H, 0.f), Centre + FVector(H, -H, 0.f), Centre + FVector(H, H, 0.f), Centre + FVector(-H, H, 0.f) };
+			FVector Screen[4];
+			bool bVisible = true;
+			for (int32 K = 0; K < 4; ++K)
+			{
+				Screen[K] = Project(Corners[K]);
+				bVisible &= Screen[K].Z > 0.f;
+			}
+			if (bVisible)
+			{
+				for (int32 K = 0; K < 4; ++K)
+				{
+					DrawLine(Screen[K].X, Screen[K].Y, Screen[(K + 1) % 4].X, Screen[(K + 1) % 4].Y, Color, bEditing ? 2.f : 1.f);
+				}
+			}
+		}
+		if (!bNear || Zone.Places.IsEmpty())
+		{
+			continue;
+		}
+		Middle /= Zone.Places.Num();
+		const FVector Screen = Project(Middle + FVector(0.f, 0.f, 120.f));
+		if (Screen.Z > 0.f)
+		{
+			const TCHAR* What = Zone.Accepts == EStoreFilter::Wood ? TEXT("wood") : Zone.Accepts == EStoreFilter::Food ? TEXT("food") : TEXT("anything");
+			const FString Label = FString::Printf(TEXT("Stockpile: %s  (%d)"), What, Stored);
+			float W, Th;
+			GetTextSize(Label, W, Th, Font, 1.1f);
+			DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.45f), Screen.X - W * 0.5f - 6.f, Screen.Y - 2.f, W + 12.f, Th + 4.f);
+			DrawText(Label, FLinearColor(Color.R, Color.G, Color.B, 1.f), Screen.X - W * 0.5f, Screen.Y, Font, 1.1f);
+		}
 	}
 }
 

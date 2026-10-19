@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Storage.h"
 #include "Founder.generated.h"
 
 class AColony;
@@ -81,7 +82,9 @@ private:
 	void LetGo();
 	void Arrive();
 	void Work(float GameHours);
-	void CarryTo(AItem* Item);
+	/** Picks an item up and sets off to the nearest stockpile with room; false (and it stays
+	 *  where it lies) when none has room. */
+	bool CarryTo(AItem* Item);
 	FVector FishingSpot() const;
 	bool WalkTo(const FVector& Target, float GameHours);
 	FVector PickWanderSpot() const;
@@ -123,6 +126,8 @@ private:
 	// Work in hand.
 	UPROPERTY()
 	TObjectPtr<AItem> Carried;
+	/** The stockpile slot kept for what is being carried. */
+	FStoreSpot CarrySpot;
 	/** The item being fetched, before it is picked up. */
 	UPROPERTY()
 	TObjectPtr<AItem> Fetching;

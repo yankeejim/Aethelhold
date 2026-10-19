@@ -274,19 +274,30 @@ FVector AFounder::FishingSpot() const
 	return Colony->GetFire();
 }
 
-void AFounder::CarryTo(AItem* Item)
+bool AFounder::CarryTo(AItem* Item)
 {
 	Fetching = nullptr;
+	CarrySpot = Colony->Reserve(Item->Type, GetActorLocation());
+	if (!CarrySpot.IsValid())
+	{
+		Item->bClaimed = false;
+		Activity = EActivity::Resting;
+		Pause = 0.1f;
+		return false;
+	}
 	Carried = Item;
 	Item->bClaimed = true;
-	Target = Colony->StockSpot(Item->Type);
+	Target = Colony->SpotLocation(CarrySpot, Item->Type);
 	bHasTarget = true;
+	return true;
 }
 
 void AFounder::LetGo()
 {
 	if (Carried)
 	{
+		Colony->Unreserve(CarrySpot);
+		CarrySpot = FStoreSpot();
 		Colony->Drop(Carried, GetActorLocation() + GetActorForwardVector() * 60.f);
 		Carried = nullptr;
 	}
@@ -393,7 +404,8 @@ void AFounder::Arrive()
 	if (Carried)
 	{
 		// At the stockpile with something to put down.
-		Colony->Store(Carried);
+		Colony->Store(Carried, CarrySpot);
+		CarrySpot = FStoreSpot();
 		Carried = nullptr;
 		Activity = EActivity::Resting;
 		Pause = Rng.FRandRange(0.05f, 0.2f);
