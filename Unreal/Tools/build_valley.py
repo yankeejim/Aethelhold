@@ -172,6 +172,21 @@ def grass_variety(mesh_path, density, cull_start_cm, cull_end_cm, scale, shadows
     return v
 
 
+def reset_meadow_plants(codes):
+    """Put Fab's meadow plant materials back as they came. Fab's distance-fade and tint
+    switches both turn the grass near-black, so the grass's far edge is hidden by the
+    ground colour instead (see ground_material)."""
+    for name, code in codes:
+        path = "/Game/Fab/Megascans/Plants/%s_%s/High/%s_tier_1/Materials/MI_%s" % (name, code, code, code)
+        mi = unreal.load_asset(path)
+        if not mi:
+            continue
+        mel.set_material_instance_static_switch_parameter_value(mi, "Use Distance Based Opacity", False)
+        mel.set_material_instance_static_switch_parameter_value(mi, "Tint Base Color", False)
+        mel.update_material_instance(mi)
+        unreal.EditorAssetLibrary.save_loaded_asset(mi)
+
+
 def grass_type():
     """Real grass clumps (Megascans Wild Grass) that the landscape grows on the meadows."""
     # Fab's foliage materials aren't flagged for instanced meshes, which landscape grass is.
@@ -196,6 +211,7 @@ def grass_type():
             ("Ribbon_Grass", "tbdpec3r", "ABCDEF", 6.0, (0.8, 1.3)),
             ("Wood_Sorrel", "wcwmchzja", "ABCDEFGH", 10.0, (1.0, 1.6)),
             ("Field_Poppy", "vmcobd0ja", "ABCDEFGH", 0.8, (0.9, 1.2))]
+    reset_meadow_plants([(n, c) for n, c, _l, _d, _s in near])
     for name, code, letters, density, scale in near:
         for var in letters:
             varieties.append(grass_variety(plant_mesh(name, code, var), density / len(letters) * 8,
@@ -290,10 +306,10 @@ def ground_material(grass, forest_mask):
     to_eye = g.sub(pos, eye)
     dist = g.node(unreal.MaterialExpressionLength)
     link(to_eye, "", dist, "")
-    far = g.ramp(dist, 4000, 9000)
+    far = g.ramp(dist, 5000, 8500)
     patches = g.noise(pos, 0.00012, 3)
     tufts = g.noise(pos, 0.0007, 2)
-    sward = g.lerp(g.color((0.075, 0.115, 0.03)), g.color((0.15, 0.165, 0.055)),
+    sward = g.lerp(g.color((0.12, 0.13, 0.045)), g.color((0.2, 0.19, 0.075)),
                    g.lerp(g.lerp(patches, lush, g.const(0.4)), tufts, g.const(0.35)))
     # Keep a little of the photo's light and dark so it isn't a flat colour.
     grain = g.mul(g.mask(g.sample(unreal.load_asset(
@@ -314,7 +330,7 @@ def ground_material(grass, forest_mask):
     # Forest floor where the woods stand (the same map the trees are planted from).
     mask_uv = g.div(xy, float(SIZE_CM))
     woods = g.mask(g.sample(forest_mask, mask_uv, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE), "r", "RGB")
-    forest_a = g.ramp(woods, 0.3, 0.65)
+    forest_a = g.ramp(woods, 0.12, 0.4)
     shore_a = g.ramp(height, 90, 30)
     # Gravel from just above the waterline down: the beaches on the inside of bends.
     bed_a = g.ramp(height, 25, -15)

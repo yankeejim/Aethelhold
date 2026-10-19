@@ -24,6 +24,9 @@ Detailed designs: `docs/resources.md` (materials, workshops, hauling, spoilage, 
   stays fast; a few dozen notables have AI minds.
 - The notables think with a local model on the player's PC (Ollama; qwen2.5 7b by default,
   14b as the option for strong PCs).
+- Maps are generated, like Songs of Syx and Dwarf Fortress: each new game makes its own world
+  from a seed. The founding valley is the first generator; it is built from a seed already
+  (`FValleyTerrain`, `Tools/build_valley.py`) but baked in the editor, not yet made at game start.
 - First playable milestone: "the founding" (seven founders, the first winter; see `docs/concept.md`).
 
 ## Architecture rules
