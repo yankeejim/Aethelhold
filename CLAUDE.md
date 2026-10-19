@@ -2,7 +2,8 @@
 
 A high-fantasy city-builder for PC in Unreal Engine 5. Team: Jim (designer, owner) and Claude.
 The agreed concept is in `docs/concept.md`. Read it before designing or building anything.
-Detailed designs: `docs/resources.md` (materials, workshops, hauling, spoilage, skills).
+Detailed designs: `docs/resources.md` (materials, workshops, hauling, spoilage, skills),
+`docs/art.md` (where the art comes from, and which Fab packs are in use).
 
 ## Settled decisions (don't change without asking Jim)
 
@@ -35,6 +36,27 @@ Detailed designs: `docs/resources.md` (materials, workshops, hauling, spoilage, 
   information they couldn't have had.
 - Saves keep the city as it is, but the game doesn't need to replay identically after loading.
   Strict determinism is not required.
+
+## The Unreal project (`Unreal/`)
+
+| What | Where |
+| --- | --- |
+| Game code (camera, game mode, terrain function) | `Source/Aethelhold/` |
+| Editor tools called by scripts (landscape builder) | `Source/AethelholdEditor/` |
+| The founding map, built by script, never by hand | `Tools/build_valley.py` → `Content/Maps/Valley` |
+
+```
+Unreal\build_editor.bat              # compile the C++ (close the editor first)
+Unreal\Tools\build_valley.bat        # rebuild the map (editor opens, builds, saves, closes)
+Unreal\editor.bat                    # open the editor
+Unreal\play.bat                      # play in a window
+powershell -File Unreal\Tools\shot.ps1 -Cam "X,Y,Yaw,Dist" -Out Unreal\Saved\shots\a.png
+```
+
+- Camera: WASD pan, wheel zoom, Q/E or middle mouse turn, Shift faster. `-cam=X,Y,Yaw,Dist`
+  (meters) on the command line sets where it starts.
+- Art downloaded from Fab lives in `Content/Fab` and `Content/Megascans`, which git ignores.
+  Other `.uasset`/`.umap` files go through Git LFS.
 
 ## How we work
 

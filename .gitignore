@@ -1,0 +1,14 @@
+# Unreal build output and caches
+Unreal/Binaries/
+Unreal/Intermediate/
+Unreal/Saved/
+Unreal/DerivedDataCache/
+Unreal/.vs/
+Unreal/*.sln
+Unreal/Plugins/*/Binaries/
+Unreal/Plugins/*/Intermediate/
+
+# Art downloaded from Fab: re-download it rather than storing it here (see docs/art.md)
+Unreal/Content/Fab/
+Unreal/Content/Megascans/
+Unreal/Content/MSPresets/
