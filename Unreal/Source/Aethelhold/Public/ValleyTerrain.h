@@ -19,8 +19,21 @@ struct AETHELHOLD_API FValleyTerrain
 
 	float HeightAt(float X, float Y) const;
 	float RiverCenterX(float Y) const;
+	/** Half the width of the river bed, before the banks rise. */
+	float RiverHalfWidth(float X, float Y) const;
 	/** Where the founders arrive: a meadow on the river's east bank, mid-valley. */
 	FVector2D StartSpot() const;
+
+	/** How wooded the land is here, 0 (open meadow) to 1 (deep wood). Woods grow on the
+	 *  higher ground in patches, thin out on steep slopes and bare mountaintops, and leave a
+	 *  clearing where the founders arrive. */
+	float ForestDensity(float X, float Y) const;
+	/** 0..1 pattern of groves and glades, about 40 m across. */
+	float Clumping(float X, float Y) const;
+	/** Steepness, as rise over run. */
+	float SlopeAt(float X, float Y) const;
+	/** Meters from the water's edge (negative in the river). */
+	float DistanceFromWater(float X, float Y) const;
 
 private:
 	float Noise(float X, float Y, float Scale, int32 Octaves) const;

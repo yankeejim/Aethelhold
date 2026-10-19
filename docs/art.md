@@ -40,6 +40,23 @@ All free Megascans from Fab, quality High (added 2026-10-18):
 | Small Pebbles Ground | river bed | xbliajz |
 | Rock Cliff | steep slopes | xccibbi |
 
+Megaplants trees (free, Fab; land in `Content/Megaplant_Library`, git ignores it). They need
+the "Procedural Vegetation Editor" and "Dynamic Wind" plugins and "Nanite Foliage" (all on in
+the project). Planted by `UValleyBuilder::BuildForest` as instanced skeletal meshes with
+dynamic wind:
+
+| Pack | Where |
+| --- | --- |
+| English Oak | woods, lone meadow oaks |
+| European Beech | woods |
+| Silver Birch | wood edges, hills |
+| Black Alder, Goat Willow | along the river |
+| Norway Spruce | high ground |
+| Common Hazel | wood edges |
+
+Still to add: Elder; Megascans Wheat Grass, Ribbon Grass, Wild Grass (second kind),
+Field Poppy, Wood Sorrel, Mossy Rocks, Forest Boulder.
+
 `Tools/build_valley.py` also turns on "used with instanced static meshes" on Fab's
 `M_MS_Foliage` and `M_MS_Billboard`, which landscape grass needs.
 

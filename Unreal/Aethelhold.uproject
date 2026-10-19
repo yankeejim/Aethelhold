@@ -20,6 +20,8 @@
 		{ "Name": "PythonScriptPlugin", "Enabled": true },
 		{ "Name": "EditorScriptingUtilities", "Enabled": true },
 		{ "Name": "PCG", "Enabled": true },
+		{ "Name": "ProceduralVegetationEditor", "Enabled": true },
+		{ "Name": "DynamicWind", "Enabled": true },
 		{ "Name": "Fab", "Enabled": true },
 		{ "Name": "ModelingToolsEditorMode", "Enabled": true, "TargetAllowList": [ "Editor" ] }
 	]

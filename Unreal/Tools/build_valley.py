@@ -41,30 +41,6 @@ def link(a, a_out, b, b_in):
     mel.connect_material_expressions(a, a_out, b, b_in)
 
 
-def color(mat, rgb, x, y):
-    return node(mat, unreal.MaterialExpressionConstant3Vector, x, y,
-                constant=unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
-
-
-def const(mat, value, x, y):
-    return node(mat, unreal.MaterialExpressionConstant, x, y, r=value)
-
-
-def lerp(mat, a, b, alpha, x, y):
-    out = node(mat, unreal.MaterialExpressionLinearInterpolate, x, y)
-    link(a, "", out, "A")
-    link(b, "", out, "B")
-    link(alpha, "", out, "Alpha")
-    return out
-
-
-def noise(mat, position, scale, levels, lo, hi, x, y):
-    out = node(mat, unreal.MaterialExpressionNoise, x, y, scale=scale, levels=levels,
-               output_min=lo, output_max=hi, turbulence=False)
-    link(position, "", out, "Position")
-    return out
-
-
 class Graph:
     """Small helper for building material graphs in Python without placing every node by hand."""
 
@@ -144,7 +120,11 @@ SURFACES = {
     "pebbles": ("Small_Pebbles_Ground", "xbliajz"),
     "rock": ("Rock_Cliff", "xccibbi"),
 }
-GRASS_MESHES = "/Game/Fab/Megascans/Plants/Wild_Grass_vlkhcbxia/High/vlkhcbxia_tier_1/StaticMeshes/"
+
+
+def plant_mesh(name, code, var):
+    """A Megascans plant mesh by pack name, code and variant letter."""
+    return "/Game/Fab/Megascans/Plants/%s_%s/High/%s_tier_1/StaticMeshes/SM_%s_Var%s" % (name, code, code, code, var)
 
 
 def surface(g, xy, name, tile_cm):
@@ -172,6 +152,26 @@ def blend(g, a, b, alpha):
     return {k: g.lerp(a[k], b[k], edge) for k in ("colour", "normal", "rough", "height")}
 
 
+def grass_variety(mesh_path, density, cull_start_cm, cull_end_cm, scale, shadows):
+    """One kind of plant the landscape scatters: how dense (per 10 m2), how far it shows."""
+    v = unreal.GrassVariety()
+    v.set_editor_property("grass_mesh", unreal.load_asset(mesh_path))
+    d = unreal.PerPlatformFloat()
+    d.set_editor_property("default", density)
+    v.set_editor_property("grass_density", d)
+    start = unreal.PerPlatformInt()
+    start.set_editor_property("default", cull_start_cm)
+    end = unreal.PerPlatformInt()
+    end.set_editor_property("default", cull_end_cm)
+    v.set_editor_property("start_cull_distance", start)
+    v.set_editor_property("end_cull_distance", end)
+    v.set_editor_property("scale_x", unreal.FloatInterval(*scale))
+    v.set_editor_property("random_rotation", True)
+    v.set_editor_property("align_to_surface", True)
+    v.set_editor_property("cast_dynamic_shadow", shadows)
+    return v
+
+
 def grass_type():
     """Real grass clumps (Megascans Wild Grass) that the landscape grows on the meadows."""
     # Fab's foliage materials aren't flagged for instanced meshes, which landscape grass is.
@@ -188,29 +188,88 @@ def grass_type():
     else:
         grass = assets.create_asset("LGT_Meadow", "/Game/Materials", unreal.LandscapeGrassType, None)
     varieties = []
-    for var in "ABCDEFGH":
-        v = unreal.GrassVariety()
-        v.set_editor_property("grass_mesh", unreal.load_asset(GRASS_MESHES + "SM_vlkhcbxia_Var" + var))
-        density = unreal.PerPlatformFloat()
-        density.set_editor_property("default", 35.0)
-        v.set_editor_property("grass_density", density)
-        start = unreal.PerPlatformInt()
-        start.set_editor_property("default", 4500)
-        end = unreal.PerPlatformInt()
-        end.set_editor_property("default", 7500)
-        v.set_editor_property("start_cull_distance", start)
-        v.set_editor_property("end_cull_distance", end)
-        v.set_editor_property("scale_x", unreal.FloatInterval(1.4, 2.6))
-        v.set_editor_property("random_rotation", True)
-        v.set_editor_property("align_to_surface", True)
-        v.set_editor_property("cast_dynamic_shadow", True)
-        varieties.append(v)
+    # A real meadow is a mix: several grasses, clover-like sorrel low down, poppies here and
+    # there. Densities are plants per 10 m2.
+    near = [("Wild_Grass", "vlkhcbxia", "ABCDEFGH", 22.0, (1.3, 2.4)),
+            ("Wild_Grass", "vczndjqja", "ABCDEFGH", 22.0, (1.0, 1.8)),
+            ("Wheat_Grass", "tdcrdbur", "ABCDEF", 12.0, (0.9, 1.4)),
+            ("Ribbon_Grass", "tbdpec3r", "ABCDEF", 6.0, (0.8, 1.3)),
+            ("Wood_Sorrel", "wcwmchzja", "ABCDEFGH", 10.0, (1.0, 1.6)),
+            ("Field_Poppy", "vmcobd0ja", "ABCDEFGH", 0.8, (0.9, 1.2))]
+    for name, code, letters, density, scale in near:
+        for var in letters:
+            varieties.append(grass_variety(plant_mesh(name, code, var), density / len(letters) * 8,
+                                           4500, 7500, scale, True))
+    # Far: the bigger clumps only, sparse and larger, out to 180 m so the meadow doesn't go bald.
+    for var in "ABD":
+        varieties.append(grass_variety(plant_mesh("Wild_Grass", "vlkhcbxia", var), 6.0, 14000, 18000, (2.2, 3.2), False))
     grass.set_editor_property("grass_varieties", varieties)
     unreal.EditorAssetLibrary.save_loaded_asset(grass)
     return grass
 
 
-def ground_material(grass):
+def river_material(flow_map):
+    """The river: Unreal's single-layer water (deep water darkens, shallows show the bed) with
+    ripples that drift downstream along the baked flow map, quickest mid-channel."""
+    mat = new_material("M_River")
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_SINGLE_LAYER_WATER)
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_OPAQUE)
+    g = Graph(mat)
+    ripples = unreal.load_asset("/Engine/Functions/Engine_MaterialFunctions02/ExampleContent/Textures/water_n")
+    kind = unreal.MaterialSamplerType
+
+    xy = g.mask(g.node(unreal.MaterialExpressionWorldPosition), "rg")
+    flow = g.sample(flow_map, g.div(xy, float(SIZE_CM)), kind.SAMPLERTYPE_LINEAR_COLOR)
+    direction = g.sub(g.mul(g.mask(flow, "rg", "RGB"), 2.0), 1.0)
+    velocity = g.mul(direction, g.mask(flow, "b", "RGB"))
+
+    # Two copies of the ripples slide along the flow half a cycle apart; each fades out as it
+    # resets, so the water keeps moving without ever visibly jumping back.
+    time = g.mul(g.node(unreal.MaterialExpressionTime), 0.08)
+    phase_a = g.node(unreal.MaterialExpressionFrac)
+    link(time, "", phase_a, "")
+    phase_b = g.node(unreal.MaterialExpressionFrac)
+    link(g.add(time, 0.5), "", phase_b, "")
+    fade = g.node(unreal.MaterialExpressionAbs)
+    link(g.sub(g.mul(phase_a, 2.0), 1.0), "", fade, "")
+
+    def flowing(size_cm, reach):
+        uv = g.div(xy, float(size_cm))
+        a_uv = g.sub(uv, g.mul(velocity, g.mul(phase_a, reach)))
+        b_uv = g.add(g.sub(uv, g.mul(velocity, g.mul(phase_b, reach))), 0.37)
+        a_n = g.mask(g.sample(ripples, a_uv, kind.SAMPLERTYPE_NORMAL), "rgb", "RGB")
+        b_n = g.mask(g.sample(ripples, b_uv, kind.SAMPLERTYPE_NORMAL), "rgb", "RGB")
+        return g.lerp(a_n, b_n, fade)
+
+    both = g.add(flowing(900, 1.2), flowing(300, 2.6))
+    calm = g.lerp(g.color((0.0, 0.0, 1.0)), both, g.const(0.4))
+    normal = g.node(unreal.MaterialExpressionNormalize)
+    link(calm, "", normal, "")
+    mel.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
+    mel.connect_material_property(g.const(0.04), "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(g.color((0.02, 0.03, 0.025)), "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    out = g.node(unreal.MaterialExpressionSingleLayerWaterMaterialOutput)
+    link(g.color((0.04, 0.06, 0.04)), "", out, "ScatteringCoefficients")
+    link(g.color((0.3, 0.1, 0.12)), "", out, "AbsorptionCoefficients")
+    link(g.const(0.2), "", out, "PhaseG")
+    mel.recompile_material(mat)
+    return mat
+
+
+def build_river(material):
+    """One flat sheet of water at the river's level across the whole map. The banks hide it
+    everywhere but the channel, so the shoreline is wherever the ground meets the water."""
+    water = spawn(unreal.StaticMeshActor, (SIZE_CM / 2, SIZE_CM / 2, 0), label="River")
+    mesh = water.static_mesh_component
+    mesh.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Plane"))
+    mesh.set_material(0, material)
+    mesh.set_collision_profile_name("NoCollision")
+    mesh.set_editor_property("cast_shadow", False)
+    water.set_actor_scale3d(unreal.Vector(SIZE_CM / 100, SIZE_CM / 100, 1))
+
+
+def ground_material(grass, forest_mask):
     """The valley floor from Megascans surfaces: meadow, forest floor on the hills, mud along
     the river, pebbles on the river bed and rock on steep slopes. Each one's place comes from
     height, slope and noise, so the map needs no hand painting."""
@@ -226,29 +285,39 @@ def ground_material(grass):
     # Meadow: Megascans dried grass, greened where the noise says the grass is lusher.
     lush = g.ramp(g.mul(big, mid), 0.12, 0.4)
     meadow = surface(g, xy, "meadow", 260)
-    meadow["colour"] = g.mul(meadow["colour"], g.lerp(g.color((0.55, 0.78, 0.36)), g.color((0.36, 0.66, 0.22)), lush))
+    meadow["colour"] = g.mul(meadow["colour"], g.lerp(g.color((0.5, 0.75, 0.33)), g.color((0.4, 0.68, 0.26)), lush))
     forest = surface(g, xy, "forest", 300)
+    # Darker, browner leaf litter in the shade of the woods.
+    forest["colour"] = g.mul(forest["colour"], g.color((0.62, 0.62, 0.5)))
     mud = surface(g, xy, "mud", 280)
     pebbles = surface(g, xy, "pebbles", 180)
     rock = surface(g, xy, "rock", 700)
 
     # Forest floor on the higher ground and in noisy patches on the plain; mud along the
     # water's edge; pebbles below the water line; rock steeper than about 35 degrees.
-    forest_a = g.sat(g.add(g.ramp(height, 1200, 2600), g.mul(g.sub(big, 0.74), 3.0)))
-    shore_a = g.ramp(height, 150, 50)
-    bed_a = g.ramp(height, -20, -90)
+    # Forest floor where the woods stand (the same map the trees are planted from).
+    mask_uv = g.div(xy, float(SIZE_CM))
+    woods = g.mask(g.sample(forest_mask, mask_uv, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE), "r", "RGB")
+    forest_a = g.ramp(woods, 0.3, 0.65)
+    shore_a = g.ramp(height, 90, 30)
+    # Gravel from just above the waterline down: the beaches on the inside of bends.
+    bed_a = g.ramp(height, 25, -15)
     rock_a = g.ramp(up, 0.86, 0.74)
 
     out = blend(g, meadow, forest, forest_a)
     out = blend(g, out, mud, shore_a)
     out = blend(g, out, pebbles, bed_a)
     out = blend(g, out, rock, rock_a)
-    mel.connect_material_property(out["colour"], "", unreal.MaterialProperty.MP_BASE_COLOR)
+    # Ground the river keeps wet: darker and shinier, fading out a little above the water.
+    wet = g.ramp(height, 30, 0)
+    colour = g.mul(out["colour"], g.lerp(g.const(1.0), g.const(0.7), wet))
+    rough = g.lerp(out["rough"], g.const(0.3), wet)
+    mel.connect_material_property(colour, "", unreal.MaterialProperty.MP_BASE_COLOR)
     mel.connect_material_property(out["normal"], "", unreal.MaterialProperty.MP_NORMAL)
-    mel.connect_material_property(out["rough"], "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
 
     # Grass grows on open meadow only, thinning toward forest, mud and rock.
-    open_ground = g.mul(g.mul(g.sub(1.0, forest_a), g.sub(1.0, shore_a)), g.sub(1.0, rock_a))
+    open_ground = g.mul(g.mul(g.mul(g.sub(1.0, forest_a), g.sub(1.0, shore_a)), g.sub(1.0, rock_a)), g.sub(1.0, bed_a))
     grass_out = g.node(unreal.MaterialExpressionLandscapeGrassOutput)
     meadow_input = unreal.GrassInput()
     meadow_input.set_editor_property("name", "Meadow")
@@ -256,52 +325,6 @@ def ground_material(grass):
     grass_out.set_editor_property("grass_types", [meadow_input])
     link(g.ramp(open_ground, 0.25, 0.75), "", grass_out, "Meadow")
 
-    mel.recompile_material(mat)
-    return mat
-
-
-def water_material():
-    """A slow river: Unreal's single-layer water, with two drifting ripple layers."""
-    mat = new_material("M_River")
-    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_SINGLE_LAYER_WATER)
-    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_OPAQUE)
-    ripple_tex = unreal.load_asset("/Engine/Functions/Engine_MaterialFunctions02/ExampleContent/Textures/water_n")
-
-    pos = node(mat, unreal.MaterialExpressionWorldPosition, -1400, 0)
-    xy = node(mat, unreal.MaterialExpressionComponentMask, -1250, 0, r=True, g=True, b=False, a=False)
-    link(pos, "", xy, "")
-
-    def ripples(size, sx, sy, y):
-        uv = node(mat, unreal.MaterialExpressionDivide, -1100, y)
-        link(xy, "", uv, "A")
-        link(const(mat, size, -1200, y + 80), "", uv, "B")
-        pan = node(mat, unreal.MaterialExpressionPanner, -950, y, speed_x=sx, speed_y=sy)
-        link(uv, "", pan, "Coordinate")
-        sample = node(mat, unreal.MaterialExpressionTextureSample, -750, y, texture=ripple_tex,
-                      sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
-        link(pan, "", sample, "UVs")
-        return sample
-
-    a = ripples(900.0, 0.010, 0.022, -200)
-    b = ripples(340.0, -0.017, 0.031, 100)
-    both = node(mat, unreal.MaterialExpressionAdd, -500, -50)
-    link(a, "RGB", both, "A")
-    link(b, "RGB", both, "B")
-    flat = node(mat, unreal.MaterialExpressionLinearInterpolate, -350, -50)
-    link(color(mat, (0.0, 0.0, 1.0), -500, 80), "", flat, "A")
-    link(both, "", flat, "B")
-    link(const(mat, 0.35, -500, 160), "", flat, "Alpha")
-    normal = node(mat, unreal.MaterialExpressionNormalize, -200, -50)
-    link(flat, "", normal, "")
-    mel.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
-    mel.connect_material_property(const(mat, 0.04, -200, 150), "", unreal.MaterialProperty.MP_ROUGHNESS)
-    mel.connect_material_property(color(mat, (0.02, 0.03, 0.025), -200, 250), "",
-                                  unreal.MaterialProperty.MP_BASE_COLOR)
-
-    out = node(mat, unreal.MaterialExpressionSingleLayerWaterMaterialOutput, 200, 300)
-    link(color(mat, (0.035, 0.065, 0.05), 0, 250), "", out, "ScatteringCoefficients")
-    link(color(mat, (0.45, 0.16, 0.10), 0, 350), "", out, "AbsorptionCoefficients")
-    link(const(mat, 0.2, 0, 450), "", out, "PhaseG")
     mel.recompile_material(mat)
     return mat
 
@@ -354,17 +377,6 @@ def build_sky():
     post.set_editor_property("settings", settings)
 
 
-def build_river(material):
-    plane = unreal.load_asset("/Engine/BasicShapes/Plane")
-    water = spawn(unreal.StaticMeshActor, (SIZE_CM / 2, SIZE_CM / 2, 0), label="River")
-    mesh = water.static_mesh_component
-    mesh.set_static_mesh(plane)
-    mesh.set_material(0, material)
-    mesh.set_collision_profile_name("NoCollision")
-    mesh.set_editor_property("cast_shadow", False)
-    water.set_actor_scale3d(unreal.Vector(SIZE_CM / 100, SIZE_CM / 100, 1))
-
-
 def build():
     log("new level")
     if unreal.EditorAssetLibrary.does_asset_exist(MAP):
@@ -375,19 +387,30 @@ def build():
                 actors.destroy_actor(actor)
     elif not levels.new_level(MAP, False):
         raise RuntimeError("could not create " + MAP)
+    # Left over from trying the Water plugin's river.
+    if unreal.EditorAssetLibrary.does_asset_exist("/Game/Materials/MI_River"):
+        unreal.EditorAssetLibrary.delete_asset("/Game/Materials/MI_River")
 
     log("materials")
-    ground = ground_material(grass_type())
-    river = water_material()
+    ground = ground_material(grass_type(), unreal.ValleyBuilder.build_forest_mask(SEED))
 
     log("landscape")
     unreal.ValleyBuilder.build_landscape(ground, SEED)
-    build_river(river)
+    build_river(river_material(unreal.ValleyBuilder.build_flow_map(SEED)))
+    log("forest")
+    unreal.ValleyBuilder.build_forest(SEED)
     build_sky()
 
     start = unreal.ValleyBuilder.start_spot(SEED)
     spawn(unreal.PlayerStart, (start.x, start.y, start.z + 200), (0, 0, 180), "Founders arrive")
 
+    # Megascans plants sway only when this actor is in the level (it drives their wind).
+    wind = unreal.load_asset("/Game/Fab/Megascans/Plants/BP_GlobalFoliageActor")
+    if wind:
+        actors.spawn_actor_from_object(wind, unreal.Vector(0, 0, 0)).set_actor_label("Wind")
+
+    for y in range(100, 2000, 150):
+        log("river at y=%d m: x=%.0f m" % (y, unreal.ValleyBuilder.river_center_x(y * 100.0, SEED) / 100))
     log("saved" if levels.save_current_level() else "SAVE FAILED")
 
 

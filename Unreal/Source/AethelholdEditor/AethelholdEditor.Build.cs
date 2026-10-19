@@ -6,6 +6,6 @@ public class AethelholdEditor : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine", "Aethelhold" });
-		PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "Landscape", "LandscapeEditor" });
+		PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "Landscape", "LandscapeEditor", "DynamicWind", "AssetRegistry" });
 	}
 }
