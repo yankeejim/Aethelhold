@@ -9,6 +9,8 @@
 #include "DynamicWindData.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
+#include "Engine/StaticMesh.h"
+#include "Components/InstancedStaticMeshComponent.h"
 
 namespace
 {
@@ -278,6 +280,91 @@ AActor* UValleyBuilder::BuildForest(int32 Seed)
 	}
 	UE_LOG(LogTemp, Display, TEXT("BuildForest: planted %d trees and shrubs"), Total);
 	return Forest;
+}
+
+AActor* UValleyBuilder::BuildRocks(int32 Seed)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return nullptr;
+	}
+	const FValleyTerrain Terrain(Seed);
+	auto Load = [](const TCHAR* Code)
+	{
+		const FString Name = FString::Printf(TEXT("%s_tier_1"), Code);
+		const TCHAR* Folder = FCString::Strcmp(Code, TEXT("wfstcdnaw")) == 0 ? TEXT("Mossy_Forest_Boulder") : TEXT("Mossy_Rocks");
+		return LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Fab/Megascans/3D/%s_%s/High/%s/StaticMeshes/%s.%s"),
+			Folder, Code, *Name, *Name, *Name));
+	};
+	UStaticMesh* Meshes[] = { Load(TEXT("wfstcdnaw")), Load(TEXT("tjmudcfda")), Load(TEXT("tletbf2fa")) };
+
+	AActor* Rocks = World->SpawnActor<AActor>(FVector::ZeroVector, FRotator::ZeroRotator);
+	USceneComponent* Root = NewObject<USceneComponent>(Rocks, TEXT("Root"));
+	Rocks->SetRootComponent(Root);
+	Rocks->AddInstanceComponent(Root);
+	Root->RegisterComponent();
+	Rocks->SetActorLabel(TEXT("Rocks"));
+
+	TArray<FTransform> Placed[3];
+	constexpr float Cell = 6.f;
+	const int32 Cells = FMath::FloorToInt(FValleyTerrain::SizeMeters / Cell);
+	for (int32 J = 0; J < Cells; ++J)
+	{
+		for (int32 I = 0; I < Cells; ++I)
+		{
+			FRandomStream R(HashCombine(GetTypeHash(I * 104729 + J), GetTypeHash(Seed + 17)));
+			const float X = (I + R.FRand()) * Cell;
+			const float Y = (J + R.FRand()) * Cell;
+			const float H = Terrain.HeightAt(X, Y);
+			const float Water = Terrain.DistanceFromWater(X, Y);
+			const float Slope = Terrain.SlopeAt(X, Y);
+			const float Forest = Terrain.ForestDensity(X, Y);
+			const float Roll = R.FRand();
+
+			int32 Kind;
+			float Scale;
+			if (Water > -3.f && Water < 6.f && Roll < 0.05f)
+			{
+				// Stones at the water's edge, half sunk.
+				Kind = R.RandRange(1, 2);
+				Scale = R.FRandRange(0.6f, 1.4f);
+			}
+			else if (H > 1.f && Roll < 0.004f + 0.02f * Forest + 0.05f * FMath::Clamp(Slope - 0.4f, 0.f, 1.f))
+			{
+				// Boulders in the woods and on steep slopes; the odd one in the open.
+				Kind = R.FRand() < 0.5f ? 0 : R.RandRange(1, 2);
+				Scale = Kind == 0 ? R.FRandRange(0.5f, 1.6f) : R.FRandRange(1.f, 2.5f);
+			}
+			else
+			{
+				continue;
+			}
+			// Sink each rock about a quarter of its height so it sits in the ground, not on it.
+			const float Sink = 25.f * Scale;
+			const FRotator Turn(R.FRandRange(-8.f, 8.f), R.FRandRange(0.f, 360.f), R.FRandRange(-8.f, 8.f));
+			Placed[Kind].Add(FTransform(Turn, FVector(X * 100.f, Y * 100.f, H * 100.f - Sink), FVector(Scale)));
+		}
+	}
+
+	int32 Total = 0;
+	for (int32 K = 0; K < 3; ++K)
+	{
+		if (!Meshes[K] || Placed[K].IsEmpty())
+		{
+			continue;
+		}
+		UInstancedStaticMeshComponent* Ism = NewObject<UInstancedStaticMeshComponent>(Rocks, *FString::Printf(TEXT("Rocks_%d"), K));
+		Ism->SetupAttachment(Root);
+		Ism->SetStaticMesh(Meshes[K]);
+		Ism->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Rocks->AddInstanceComponent(Ism);
+		Ism->RegisterComponent();
+		Ism->AddInstances(Placed[K], false, true);
+		Total += Placed[K].Num();
+	}
+	UE_LOG(LogTemp, Display, TEXT("BuildRocks: placed %d rocks"), Total);
+	return Rocks;
 }
 
 float UValleyBuilder::TerrainHeight(float WorldX, float WorldY, int32 Seed)

@@ -33,6 +33,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Aethelhold")
 	static AActor* BuildForest(int32 Seed);
 
+	/** Scatters Megascans rocks: boulders in the woods and on steep ground, small mossy stones
+	 *  along the river and here and there in the meadow. */
+	UFUNCTION(BlueprintCallable, Category = "Aethelhold")
+	static AActor* BuildRocks(int32 Seed);
+
 	/** The terrain height in centimeters at a world position (for placing actors). */
 	UFUNCTION(BlueprintCallable, Category = "Aethelhold")
 	static float TerrainHeight(float WorldX, float WorldY, int32 Seed);

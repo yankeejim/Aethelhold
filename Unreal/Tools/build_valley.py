@@ -201,8 +201,14 @@ def grass_type():
             varieties.append(grass_variety(plant_mesh(name, code, var), density / len(letters) * 8,
                                            4500, 7500, scale, True))
     # Far: the bigger clumps only, sparse and larger, out to 180 m so the meadow doesn't go bald.
-    for var in "ABD":
-        varieties.append(grass_variety(plant_mesh("Wild_Grass", "vlkhcbxia", var), 6.0, 14000, 18000, (2.2, 3.2), False))
+    # Middle distance: the same mix, thinner and without shadows, out to 120 m.
+    for name, code, letters, density, scale in near[:3]:
+        for var in letters[:3]:
+            varieties.append(grass_variety(plant_mesh(name, code, var), density * 1.2,
+                                           9000, 12000, (scale[0] * 1.3, scale[1] * 1.3), False))
+    # Far: the bigger clumps only, larger still, out to 250 m so the meadow doesn't go bald.
+    for var in "ABDE":
+        varieties.append(grass_variety(plant_mesh("Wild_Grass", "vlkhcbxia", var), 9.0, 20000, 25000, (2.4, 3.4), False))
     grass.set_editor_property("grass_varieties", varieties)
     unreal.EditorAssetLibrary.save_loaded_asset(grass)
     return grass
@@ -399,6 +405,7 @@ def build():
     build_river(river_material(unreal.ValleyBuilder.build_flow_map(SEED)))
     log("forest")
     unreal.ValleyBuilder.build_forest(SEED)
+    unreal.ValleyBuilder.build_rocks(SEED)
     build_sky()
 
     start = unreal.ValleyBuilder.start_spot(SEED)
