@@ -33,6 +33,27 @@ from the land, workshops that process them, and goods the city uses.
 - **Fantasy materials (later).** Monster parts (scales, venom, dragon blood) and rare
   materials come once magic is designed; they tie in with expeditions.
 
+## Storage
+
+Agreed with Jim, 2026-10-19.
+
+- **Zones the player draws.** Drag out an area and choose what it takes (wood, food, stone,
+  or anything). Founders carry each item to the nearest zone that accepts it.
+- **Space is physical.** Each item takes real room; a zone holds what fits on its ground, and
+  stacks only go so high. When nothing has room, items wait where they lie.
+- **Where food is kept matters, strongly.** Open ground spoils food fastest; shade and cover
+  slow it; storage buildings slow it most and are the reason to build them: a granary keeps
+  grain and nuts dry, a cold cellar or smokehouse keeps meat and fish. Cold weather slows
+  spoilage everywhere.
+- **Distance is work.** Hauling takes time, so where storage stands decides how fast the
+  colony runs (a woodpile by the woods, a granary by the fields).
+- **Threats to stores:**
+  - **Weather:** rain and heat spoil open food faster; logs left out rot slowly.
+  - **Vermin and animals:** rats and foxes eat open food; buildings (and later cats) keep
+    them out.
+  - **Theft:** later, in a bigger city, hungry or greedy people steal from stores.
+  - **Fire:** stores can burn; wood stacked near fires is a risk.
+
 ## The founding uses only
 
 Wood, firewood, stone, berries, meat, fish, hides and simple tools: enough for food, warmth
