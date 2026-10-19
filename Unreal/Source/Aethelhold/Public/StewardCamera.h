@@ -35,6 +35,14 @@ private:
 	void OnZoom(const FInputActionValue& Value);
 	void OnTurn(const FInputActionValue& Value);
 	void OnLook(const FInputActionValue& Value);
+	void OnSelect();
+	void OnPause();
+	void OnSpeed1() { SetSpeed(1); }
+	void OnSpeed2() { SetSpeed(3); }
+	void OnSpeed3() { SetSpeed(10); }
+	void OnFollow();
+	void SetSpeed(int32 Speed);
+	class AColony* GetColony();
 
 	/** 0 when fully zoomed in, 1 when fully out. */
 	float ZoomAlpha(float Distance) const;
@@ -77,6 +85,22 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UInputAction> LookAction;
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> SelectAction;
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> PauseAction;
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> SpeedActions[3];
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> FollowAction;
+
+	TWeakObjectPtr<class AColony> Colony;
+	/** Keep the selected founder centred until the player pans away. */
+	bool bFollow = false;
 
 	// Where the camera is heading; the view eases toward these each frame.
 	FVector TargetFocus;

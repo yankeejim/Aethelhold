@@ -45,6 +45,9 @@ Detailed designs: `docs/resources.md` (materials, workshops, hauling, spoilage, 
 | What | Where |
 | --- | --- |
 | Game code (camera, game mode, terrain function) | `Source/Aethelhold/` |
+| The founders: who they are, needs, what they do | `Founder.h/.cpp` (crowd-layer rules) |
+| Clock, stores, campfire, sun and moon | `Colony.h/.cpp` |
+| On-screen bar, name labels, founder card | `AethelHUD.h/.cpp` |
 | Editor tools called by scripts (landscape builder) | `Source/AethelholdEditor/` |
 | The founding map, built by script, never by hand | `Tools/build_valley.py` → `Content/Maps/Valley` |
 
@@ -56,8 +59,11 @@ Unreal\play.bat                      # play in a window
 powershell -File Unreal\Tools\shot.ps1 -Cam "X,Y,Yaw,Dist" -Out Unreal\Saved\shots\a.png
 ```
 
-- Camera: WASD pan, wheel zoom, Q/E or middle mouse turn, Shift faster. `-cam=X,Y,Yaw,Dist`
-  (meters) on the command line sets where it starts.
+- Camera: WASD pan, wheel zoom, Q/E or middle mouse turn, Shift faster. Click a founder, F
+  follows, Space pauses, 1 2 3 set speed. Test options: `-cam=X,Y,Yaw,Dist` (meters),
+  `-hour=H`, `-speed=S`, `-select=N`; `shot.ps1 -Extra "..."` passes them.
+- The founders are Unreal's grey mannequin (`Content/Mannequin`, copied from the engine's
+  templates) until real characters are chosen.
 - Art downloaded from Fab lives in `Content/Fab` and `Content/Megascans`, which git ignores.
   Other `.uasset`/`.umap` files go through Git LFS.
 

@@ -340,6 +340,15 @@ def ground_material(grass, forest_mask):
     out = blend(g, out, mud, shore_a)
     out = blend(g, out, pebbles, bed_a)
     out = blend(g, out, rock, rock_a)
+    # The founders' camp: ground trampled bare around the fire, grass returning toward the edge.
+    # The fire stands 15 m back from the landing spot (AColony::FoundTheColony).
+    start = unreal.ValleyBuilder.start_spot(SEED)
+    fire = g.color((start.x + 1500.0, start.y, 0.0))
+    from_fire = g.node(unreal.MaterialExpressionDistance)
+    link(xy, "", from_fire, "A")
+    link(g.mask(fire, "rg"), "", from_fire, "B")
+    camp_a = g.sat(g.add(g.ramp(from_fire, 2200, 900), g.mul(g.sub(mid, 0.5), 0.6)))
+    out = blend(g, out, mud, g.mul(camp_a, 0.85))
     # Ground the river keeps wet: darker and shinier, fading out a little above the water.
     wet = g.ramp(height, 30, 0)
     colour = g.mul(out["colour"], g.lerp(g.const(1.0), g.const(0.7), wet))
@@ -350,6 +359,7 @@ def ground_material(grass, forest_mask):
 
     # Grass grows on open meadow only, thinning toward forest, mud and rock.
     open_ground = g.mul(g.mul(g.mul(g.sub(1.0, forest_a), g.sub(1.0, shore_a)), g.sub(1.0, rock_a)), g.sub(1.0, bed_a))
+    open_ground = g.mul(open_ground, g.sub(1.0, camp_a))
     grass_out = g.node(unreal.MaterialExpressionLandscapeGrassOutput)
     meadow_input = unreal.GrassInput()
     meadow_input.set_editor_property("name", "Meadow")
@@ -406,6 +416,9 @@ def build_sky():
     settings.set_editor_property("bloom_intensity", 0.5)
     settings.set_editor_property("override_auto_exposure_bias", True)
     settings.set_editor_property("auto_exposure_bias", -0.3)
+    # Don't let the eye adjust all the way to darkness: nights should look like night.
+    settings.set_editor_property("override_auto_exposure_min_brightness", True)
+    settings.set_editor_property("auto_exposure_min_brightness", -1.0)
     post.set_editor_property("settings", settings)
 
 

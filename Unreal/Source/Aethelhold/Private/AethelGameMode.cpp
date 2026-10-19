@@ -1,5 +1,8 @@
 #include "AethelGameMode.h"
 #include "StewardCamera.h"
+#include "AethelHUD.h"
+#include "Colony.h"
+#include "Engine/World.h"
 
 AAethelPlayerController::AAethelPlayerController()
 {
@@ -19,4 +22,12 @@ AAethelGameMode::AAethelGameMode()
 {
 	DefaultPawnClass = AStewardCamera::StaticClass();
 	PlayerControllerClass = AAethelPlayerController::StaticClass();
+	HUDClass = AAethelHUD::StaticClass();
+}
+
+void AAethelGameMode::StartPlay()
+{
+	// The founders arrive as the game begins.
+	GetWorld()->SpawnActor<AColony>();
+	Super::StartPlay();
 }

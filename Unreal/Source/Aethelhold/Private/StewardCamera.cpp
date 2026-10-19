@@ -10,6 +10,10 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "AethelHUD.h"
+#include "Colony.h"
+#include "EngineUtils.h"
+#include "Founder.h"
 
 AStewardCamera::AStewardCamera()
 {
@@ -92,6 +96,20 @@ void AStewardCamera::BuildInput()
 	TurnLeft.Modifiers.Add(NewObject<UInputModifierNegate>(this));
 
 	Mapping->MapKey(LookAction, EKeys::Mouse2D);
+
+	auto Button = [this](FKey Key)
+	{
+		UInputAction* Action = NewObject<UInputAction>(this);
+		Action->ValueType = EInputActionValueType::Boolean;
+		Mapping->MapKey(Action, Key);
+		return Action;
+	};
+	SelectAction = Button(EKeys::LeftMouseButton);
+	PauseAction = Button(EKeys::SpaceBar);
+	SpeedActions[0] = Button(EKeys::One);
+	SpeedActions[1] = Button(EKeys::Two);
+	SpeedActions[2] = Button(EKeys::Three);
+	FollowAction = Button(EKeys::F);
 }
 
 void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -113,12 +131,71 @@ void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &AStewardCamera::OnZoom);
 		EIC->BindAction(TurnAction, ETriggerEvent::Triggered, this, &AStewardCamera::OnTurn);
 		EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &AStewardCamera::OnLook);
+		EIC->BindAction(SelectAction, ETriggerEvent::Started, this, &AStewardCamera::OnSelect);
+		EIC->BindAction(PauseAction, ETriggerEvent::Started, this, &AStewardCamera::OnPause);
+		EIC->BindAction(SpeedActions[0], ETriggerEvent::Started, this, &AStewardCamera::OnSpeed1);
+		EIC->BindAction(SpeedActions[1], ETriggerEvent::Started, this, &AStewardCamera::OnSpeed2);
+		EIC->BindAction(SpeedActions[2], ETriggerEvent::Started, this, &AStewardCamera::OnSpeed3);
+		EIC->BindAction(FollowAction, ETriggerEvent::Started, this, &AStewardCamera::OnFollow);
 	}
 }
 
 void AStewardCamera::OnMove(const FInputActionValue& Value)
 {
 	PendingMove += Value.Get<FVector2D>();
+	bFollow = false;
+}
+
+AColony* AStewardCamera::GetColony()
+{
+	if (!Colony.IsValid())
+	{
+		for (TActorIterator<AColony> It(GetWorld()); It; ++It)
+		{
+			Colony = *It;
+			break;
+		}
+	}
+	return Colony.Get();
+}
+
+void AStewardCamera::OnSelect()
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	AAethelHUD* Hud = PC ? Cast<AAethelHUD>(PC->GetHUD()) : nullptr;
+	if (!Hud)
+	{
+		return;
+	}
+	FHitResult Hit;
+	PC->GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+	AFounder* Founder = Cast<AFounder>(Hit.GetActor());
+	Hud->Select(Founder);
+	if (!Founder)
+	{
+		bFollow = false;
+	}
+}
+
+void AStewardCamera::OnPause()
+{
+	if (AColony* C = GetColony())
+	{
+		C->TogglePause();
+	}
+}
+
+void AStewardCamera::SetSpeed(int32 Speed)
+{
+	if (AColony* C = GetColony())
+	{
+		C->SetSpeed(Speed);
+	}
+}
+
+void AStewardCamera::OnFollow()
+{
+	bFollow = !bFollow;
 }
 
 void AStewardCamera::OnZoom(const FInputActionValue& Value)
@@ -154,7 +231,8 @@ float AStewardCamera::GroundHeight(const FVector& At) const
 	FHitResult Hit;
 	const FVector Start(At.X, At.Y, 200000.f);
 	const FVector End(At.X, At.Y, -50000.f);
-	if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility))
+	// Only the land counts, not founders or anything else standing on it.
+	if (GetWorld()->LineTraceSingleByObjectType(Hit, Start, End, FCollisionObjectQueryParams(ECC_WorldStatic)))
 	{
 		return FMath::Max(Hit.ImpactPoint.Z, FValleyTerrain::WaterLevel * 100.f);
 	}
@@ -182,6 +260,16 @@ void AStewardCamera::Tick(float DeltaSeconds)
 
 	TargetYaw += PendingTurn * TurnSpeed * DeltaSeconds;
 	PendingTurn = 0.f;
+
+	if (bFollow)
+	{
+		const APlayerController* FollowPC = Cast<APlayerController>(GetController());
+		const AAethelHUD* Hud = FollowPC ? Cast<AAethelHUD>(FollowPC->GetHUD()) : nullptr;
+		if (const AFounder* Followed = Hud ? Hud->GetSelected() : nullptr)
+		{
+			TargetFocus = Followed->GetActorLocation();
+		}
+	}
 
 	const float Margin = 5000.f;
 	const float Max = FValleyTerrain::SizeMeters * 100.f - Margin;

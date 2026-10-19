@@ -25,4 +25,6 @@ class AETHELHOLD_API AAethelGameMode : public AGameModeBase
 
 public:
 	AAethelGameMode();
+
+	virtual void StartPlay() override;
 };
