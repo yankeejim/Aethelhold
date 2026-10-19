@@ -32,6 +32,8 @@ private:
 	void Bar(float X, float Y, const FString& Label, float Value);
 	void DrawMarks(AColony* Colony);
 	void DrawZones(AColony* Colony);
+	void DrawBuildings(AColony* Colony);
+	void Outline(const TArray<FVector>& Corners, const FLinearColor& Color, float Thickness);
 	void DrawNews(AColony* Colony);
 
 	TWeakObjectPtr<AColony> Colony;

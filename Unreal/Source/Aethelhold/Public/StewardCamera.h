@@ -39,6 +39,8 @@ private:
 	void OnSelectReleased();
 	void OnMarkTrees();
 	void OnStockpiles();
+	void OnBuild();
+	void OnTurn90();
 	bool GroundUnderCursor(FVector& Out) const;
 	void OnPause();
 	void OnSpeed1() { SetSpeed(1); }
@@ -107,6 +109,12 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UInputAction> StockpileAction;
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> BuildAction;
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> RotateAction;
 
 	/** Where a drag to mark trees began, on the ground. */
 	FVector DragStart = FVector::ZeroVector;

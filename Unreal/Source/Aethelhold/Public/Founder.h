@@ -8,6 +8,7 @@
 class AColony;
 class UAnimSequence;
 class AItem;
+class ABuilding;
 class UCapsuleComponent;
 class USkeletalMeshComponent;
 
@@ -20,7 +21,7 @@ enum class ETemperament : uint8 { Calm, Cheerful, HotHeaded, Gloomy, Proud, Timi
 /** What a founder is doing, which is also what the card says about them. */
 UENUM()
 enum class EActivity : uint8 { Arriving, Wandering, Resting, Talking, Eating, Warming, Sleeping,
-	Chopping, Foraging, Fishing, Hauling };
+	Chopping, Foraging, Fishing, Hauling, Building };
 
 /** Who a founder is: fixed at the founding, apart from age. */
 USTRUCT()
@@ -66,6 +67,8 @@ public:
 	int32 GetTalkingWith() const { return TalkingWith; }
 	FString Describe() const;
 	bool IsLying() const { return bLying; }
+	ABuilding* GetHome() const { return Home; }
+	void SetHome(ABuilding* InHome, int32 InBed) { Home = InHome; Bed = InBed; }
 	FString MoodWord() const;
 
 	// Needs, 0 (desperate) to 1 (content).
@@ -134,4 +137,16 @@ private:
 	int32 Tree = INDEX_NONE;
 	float WorkLeft = 0.f;
 	bool bWaitingForFall = false;
+
+	// Building: the site a log is being brought to, or being worked on.
+	UPROPERTY()
+	TObjectPtr<ABuilding> Site;
+	bool bDelivering = false;
+
+	// Home: where this founder sleeps, once there is a roof for them.
+	UPROPERTY()
+	TObjectPtr<ABuilding> Home;
+	int32 Bed = INDEX_NONE;
+	/** On the way in through the door, before going to bed. */
+	bool bEntering = false;
 };

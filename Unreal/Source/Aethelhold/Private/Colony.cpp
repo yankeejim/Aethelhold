@@ -2,6 +2,7 @@
 #include "Founder.h"
 #include "Forest.h"
 #include "Item.h"
+#include "Building.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/LightComponent.h"
@@ -76,6 +77,43 @@ void AColony::BeginPlay()
 	if (FParse::Value(FCommandLine::Get(), TEXT("-order="), StartOrder))
 	{
 		Order = static_cast<EOrder>(FMath::Clamp(StartOrder, 0, 2));
+	}
+
+	// For testing: -logs=N lays N logs in the stockpile; -sites=1 stakes out a shelter, a cabin
+	// and a storehouse near the camp (clearing trees where they stand).
+	int32 StartLogs = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("-logs="), StartLogs))
+	{
+		for (int32 K = 0; K < StartLogs; ++K)
+		{
+			AItem* Log = SpawnItem(EItem::Log, 0, Fire, 0.f);
+			const FStoreSpot Spot = Reserve(EItem::Log, Fire);
+			if (!Spot.IsValid())
+			{
+				break;
+			}
+			Store(Log, Spot);
+		}
+	}
+	int32 StartSites = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("-sites="), StartSites) && StartSites > 0)
+	{
+		const TPair<EBuilding, FVector2D> Sites[] = {
+			{ EBuilding::Shelter, FVector2D(Fire.X, Fire.Y + 700.f) },
+			{ EBuilding::Cabin, FVector2D(Fire.X + 900.f, Fire.Y + 1200.f) },
+			{ EBuilding::Storehouse, FVector2D(Fire.X + 1900.f, Fire.Y - 350.f) },
+		};
+		for (const TPair<EBuilding, FVector2D>& S : Sites)
+		{
+			for (int32 T = 0; T < Forest->GetTrees().Num(); ++T)
+			{
+				if (FVector2D::Distance(FVector2D(Forest->GetTrees()[T].Base()), S.Value) < 600.f)
+				{
+					Forest->Clear(T);
+				}
+			}
+			PlaceBuilding(S.Key, S.Key == EBuilding::Storehouse ? 3 : 0, S.Value);
+		}
 	}
 
 	// For testing: -mark=N marks the N trees nearest the camp for felling.
@@ -415,7 +453,9 @@ bool AColony::HasRoomFor(EItem Kind) const
 
 FVector AColony::SpotLocation(const FStoreSpot& Spot, EItem Kind) const
 {
-	return PlaceCenter(Spot.Place) + Storage::SlotOffset(Kind, Spot.Slot);
+	const FStorePlace* Place = Places.Find(Spot.Place);
+	const bool bIndoor = Place && Zones[Place->Zone].bIndoor;
+	return PlaceCenter(Spot.Place) + Storage::SlotOffset(Kind, Spot.Slot, bIndoor);
 }
 
 void AColony::Store(AItem* Item, const FStoreSpot& Spot)
@@ -464,7 +504,7 @@ int32 AColony::AddZone(const FVector2D& A, const FVector2D& B)
 		{
 			const FIntPoint P(X, Y);
 			// Not in the river or on a steep bank, and not where another stockpile already is.
-			if (!Places.Contains(P) && IsDryLand(PlaceCenter(P)))
+			if (!Places.Contains(P) && !Occupied.Contains(P) && IsDryLand(PlaceCenter(P)))
 			{
 				Zone.Places.Add(P);
 			}
@@ -493,7 +533,7 @@ int32 AColony::RemoveZones(const FVector2D& A, const FVector2D& B)
 		{
 			const FIntPoint P(X, Y);
 			FStorePlace* Place = Places.Find(P);
-			if (!Place)
+			if (!Place || Zones[Place->Zone].bIndoor)
 			{
 				continue;
 			}
@@ -519,7 +559,7 @@ int32 AColony::RemoveZones(const FVector2D& A, const FVector2D& B)
 bool AColony::CycleZone(const FVector2D& At)
 {
 	const FStorePlace* Place = Places.Find(Storage::PlaceAt(At));
-	if (!Place)
+	if (!Place || Zones[Place->Zone].bIndoor)
 	{
 		return false;
 	}
@@ -539,10 +579,18 @@ void AColony::Say(const FString& Text)
 
 float AColony::SpoilRate(const AItem* Item) const
 {
-	// Food lies in the open for now: heat speeds the rot and cold slows it right down. Storage
-	// buildings, when they come, slow it further.
+	// Heat speeds the rot and cold slows it right down; a storehouse slows it further.
 	const float T = Temperature();
 	const float Heat = T > 12.f ? 1.f + (T - 12.f) * 0.08f : FMath::GetMappedRangeValueClamped(FVector2D(12.f, 2.f), FVector2D(1.f, 0.3f), T);
+	if (Item->bStored)
+	{
+		const FStorePlace* Place = Places.Find(Item->Spot.Place);
+		if (Place && Zones[Place->Zone].bIndoor)
+		{
+			// Dry and shaded in the storehouse: about three times as long.
+			return Heat * 0.35f;
+		}
+	}
 	return Heat;
 }
 
@@ -613,5 +661,285 @@ void AColony::Tick(float DeltaSeconds)
 	for (AFounder* Founder : Founders)
 	{
 		Founder->Live(GameHours);
+	}
+}
+
+// --- buildings ---
+
+void AColony::NextBuildChoice()
+{
+	if (Order != EOrder::Build)
+	{
+		Order = EOrder::Build;
+		BuildChoice = EBuilding::Shelter;
+		return;
+	}
+	const int32 Next = (int32)BuildChoice + 1;
+	if (Next >= (int32)EBuilding::Count)
+	{
+		Order = EOrder::None;
+		return;
+	}
+	BuildChoice = static_cast<EBuilding>(Next);
+}
+
+FVector2D AColony::PlaceCorner(const FIntPoint& Place) const
+{
+	return FVector2D(Place.X * Storage::PlaceSize, Place.Y * Storage::PlaceSize);
+}
+
+FIntPoint AColony::FootprintAt(EBuilding Type, int32 Turns, const FVector2D& Centre) const
+{
+	const FIntPoint Size = ABuilding::Footprint(Type, Turns);
+	const FVector2D Corner = Centre - FVector2D(Size) * Storage::PlaceSize * 0.5f;
+	return FIntPoint(FMath::RoundToInt(Corner.X / Storage::PlaceSize), FMath::RoundToInt(Corner.Y / Storage::PlaceSize));
+}
+
+bool AColony::CanPlace(EBuilding Type, int32 Turns, const FIntPoint& First, FString* Why) const
+{
+	auto Fail = [Why](const TCHAR* Reason)
+	{
+		if (Why)
+		{
+			*Why = Reason;
+		}
+		return false;
+	};
+	const FIntPoint Size = ABuilding::Footprint(Type, Turns);
+	float Low = TNumericLimits<float>::Max();
+	float High = TNumericLimits<float>::Lowest();
+	for (int32 X = 0; X < Size.X; ++X)
+	{
+		for (int32 Y = 0; Y < Size.Y; ++Y)
+		{
+			const FIntPoint P = First + FIntPoint(X, Y);
+			if (!IsDryLand(PlaceCenter(P)))
+			{
+				return Fail(TEXT("too wet or steep here"));
+			}
+			if (Places.Contains(P))
+			{
+				return Fail(TEXT("a stockpile is in the way"));
+			}
+			if (Occupied.Contains(P))
+			{
+				return Fail(TEXT("something is already built here"));
+			}
+		}
+	}
+	const FVector2D Lo = PlaceCorner(First);
+	const FVector2D Hi = PlaceCorner(First + Size);
+	for (const FVector2D& Corner : { Lo, Hi, FVector2D(Lo.X, Hi.Y), FVector2D(Hi.X, Lo.Y) })
+	{
+		const float H = OnGround(Corner.X, Corner.Y).Z;
+		Low = FMath::Min(Low, H);
+		High = FMath::Max(High, H);
+	}
+	if (High - Low > 90.f)
+	{
+		return Fail(TEXT("the ground isn't level enough"));
+	}
+	const FBox2D Area(Lo - FVector2D(60.f), Hi + FVector2D(60.f));
+	if (Area.ExpandBy(250.f).IsInside(FVector2D(Fire)))
+	{
+		return Fail(TEXT("too close to the fire"));
+	}
+	for (const FTreeSpot& Tree : Forest->GetTrees())
+	{
+		if (!Tree.bGone && Area.IsInside(FVector2D(Tree.Base())))
+		{
+			return Fail(TEXT("trees are in the way: mark them for felling first"));
+		}
+	}
+	return true;
+}
+
+ABuilding* AColony::PlaceBuilding(EBuilding Type, int32 Turns, const FVector2D& Centre)
+{
+	const FIntPoint First = FootprintAt(Type, Turns, Centre);
+	FString Why;
+	if (!CanPlace(Type, Turns, First, &Why))
+	{
+		Say(FString::Printf(TEXT("Can't build a %s there: %s."), *FString(ABuilding::Kind(Type).Name).ToLower(), *Why));
+		return nullptr;
+	}
+	// It stands level, at the height of its highest corner, so no wall hangs in the air.
+	const FIntPoint Size = ABuilding::Footprint(Type, Turns);
+	const FVector2D Lo = PlaceCorner(First);
+	const FVector2D Hi = PlaceCorner(First + Size);
+	float Top = OnGround((Lo.X + Hi.X) * 0.5f, (Lo.Y + Hi.Y) * 0.5f).Z;
+	for (const FVector2D& Corner : { Lo, Hi, FVector2D(Lo.X, Hi.Y), FVector2D(Hi.X, Lo.Y) })
+	{
+		Top = FMath::Max(Top, OnGround(Corner.X, Corner.Y).Z);
+	}
+	const FVector At((Lo.X + Hi.X) * 0.5f, (Lo.Y + Hi.Y) * 0.5f, Top);
+	ABuilding* Building = GetWorld()->SpawnActor<ABuilding>(At, FRotator(0.f, Turns * 90.f, 0.f));
+	Building->Init(Type, Turns, First);
+	const int32 Index = Buildings.Add(Building);
+	for (const FIntPoint& P : Building->Places())
+	{
+		Occupied.Add(P, Index);
+	}
+	Say(FString::Printf(TEXT("A %s is staked out: it needs %d logs."), *FString(Building->GetKind().Name).ToLower(), Building->GetKind().Logs));
+	return Building;
+}
+
+ABuilding* AColony::SiteNeedingLogs(const FVector& From) const
+{
+	ABuilding* Best = nullptr;
+	float BestDist = TNumericLimits<float>::Max();
+	for (ABuilding* B : Buildings)
+	{
+		if (!B->IsFinished() && B->LogsWanted() > 0)
+		{
+			const float D = FVector::DistSquared2D(From, B->GetActorLocation());
+			if (D < BestDist)
+			{
+				BestDist = D;
+				Best = B;
+			}
+		}
+	}
+	return Best;
+}
+
+ABuilding* AColony::SiteToWork(const FVector& From) const
+{
+	ABuilding* Best = nullptr;
+	float BestDist = TNumericLimits<float>::Max();
+	for (ABuilding* B : Buildings)
+	{
+		if (B->CanWork())
+		{
+			const float D = FVector::DistSquared2D(From, B->GetActorLocation());
+			if (D < BestDist)
+			{
+				BestDist = D;
+				Best = B;
+			}
+		}
+	}
+	return Best;
+}
+
+AItem* AColony::LogToTake(const FVector& From) const
+{
+	AItem* Best = nullptr;
+	float BestDist = TNumericLimits<float>::Max();
+	for (AItem* Item : Items)
+	{
+		if (Item->Type == EItem::Log && !Item->bClaimed)
+		{
+			const float D = FVector::DistSquared2D(From, Item->GetActorLocation());
+			if (D < BestDist)
+			{
+				BestDist = D;
+				Best = Item;
+			}
+		}
+	}
+	return Best;
+}
+
+void AColony::Deliver(AItem* Log, ABuilding* Site)
+{
+	Unstore(Log);
+	Items.Remove(Log);
+	Log->Destroy();
+	Site->Incoming = FMath::Max(0, Site->Incoming - 1);
+	Site->Delivered += 1;
+}
+
+void AColony::OnBuilt(ABuilding* Building)
+{
+	if (!Building->IsFinished())
+	{
+		return;
+	}
+	const FString Name = FString(Building->GetKind().Name).ToLower();
+	if (Building->GetType() == EBuilding::Storehouse)
+	{
+		// The floor inside becomes a food store, kept dry and shaded.
+		FStoreZone Zone;
+		Zone.Accepts = EStoreFilter::Food;
+		Zone.bIndoor = true;
+		Zone.Places = Building->Places();
+		const int32 Index = Zones.Add(Zone);
+		for (const FIntPoint& P : Zone.Places)
+		{
+			Places.Add(P).Zone = Index;
+		}
+		Say(TEXT("The storehouse is finished: food kept inside will last much longer."));
+		return;
+	}
+	Say(FString::Printf(TEXT("The %s is finished."), *Name));
+	AssignHomes();
+}
+
+void AColony::AssignHomes()
+{
+	// ByFamily stay together: the biggest family takes the first cabin with room, then the
+	// rest find a place, cabins before shelters.
+	TArray<ABuilding*> Homes;
+	for (ABuilding* B : Buildings)
+	{
+		if (B->IsFinished() && B->GetKind().Beds > 0)
+		{
+			Homes.Add(B);
+		}
+	}
+	Homes.Sort([](const ABuilding& A, const ABuilding& B) { return A.GetKind().Beds > B.GetKind().Beds; });
+	TArray<int32> Free;
+	for (ABuilding* B : Homes)
+	{
+		Free.Add(B->GetKind().Beds);
+	}
+
+	TMap<FString, TArray<AFounder*>> ByFamily;
+	for (AFounder* F : Founders)
+	{
+		ByFamily.FindOrAdd(F->GetInfo().Family).Add(F);
+	}
+	TArray<TArray<AFounder*>> Groups;
+	ByFamily.GenerateValueArray(Groups);
+	Groups.Sort([](const TArray<AFounder*>& A, const TArray<AFounder*>& B) { return A.Num() > B.Num(); });
+
+	TArray<FString> MovedIn;
+	for (const TArray<AFounder*>& Family : Groups)
+	{
+		int32 Home = INDEX_NONE;
+		for (int32 H = 0; H < Homes.Num() && Home == INDEX_NONE; ++H)
+		{
+			if (Free[H] >= Family.Num())
+			{
+				Home = H;
+			}
+		}
+		for (AFounder* F : Family)
+		{
+			int32 Pick = Home;
+			if (Pick == INDEX_NONE || Free[Pick] <= 0)
+			{
+				Pick = INDEX_NONE;
+				for (int32 H = 0; H < Homes.Num() && Pick == INDEX_NONE; ++H)
+				{
+					Pick = Free[H] > 0 ? H : INDEX_NONE;
+				}
+			}
+			ABuilding* Was = F->GetHome();
+			if (Pick == INDEX_NONE)
+			{
+				F->SetHome(nullptr, INDEX_NONE);
+				continue;
+			}
+			const int32 Bed = Homes[Pick]->GetKind().Beds - Free[Pick];
+			--Free[Pick];
+			F->SetHome(Homes[Pick], Bed);
+			if (Was != Homes[Pick] && Homes[Pick]->GetType() == EBuilding::Cabin && !MovedIn.Contains(F->GetInfo().Family))
+			{
+				MovedIn.Add(F->GetInfo().Family);
+				Say(FString::Printf(TEXT("The %s family moves into the cabin."), *F->GetInfo().Family));
+			}
+		}
 	}
 }

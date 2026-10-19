@@ -3,6 +3,7 @@
 #include "Founder.h"
 #include "Forest.h"
 #include "Item.h"
+#include "Building.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -90,6 +91,7 @@ void AAethelHUD::DrawHUD()
 	}
 	bPicked = true;
 	DrawZones(C);
+	DrawBuildings(C);
 	DrawMarks(C);
 	DrawNames(C);
 	DrawTopBar(C);
@@ -112,7 +114,7 @@ void AAethelHUD::DrawTopBar(AColony* C)
 
 	DrawRect(Panel, 0.f, 0.f, Canvas->SizeX, 40.f);
 	DrawText(Line, Ink, 20.f, 10.f, Font, 1.25f);
-	const FString Help = TEXT("Space pause   1 2 3 speed   Click a founder   F follow   C mark trees   Z stockpiles");
+	const FString Help = TEXT("Space pause   1 2 3 speed   Click a founder   F follow   C mark trees   Z stockpiles   B build");
 	float W, Hh;
 	GetTextSize(Help, W, Hh, Font, 1.f);
 	DrawText(Help, Dim, Canvas->SizeX - W - 20.f, 12.f, Font, 1.f);
@@ -142,9 +144,19 @@ void AAethelHUD::DrawMarks(AColony* C)
 	if (C->GetOrder() != AColony::EOrder::None)
 	{
 		UFont* Font = GEngine->GetMediumFont();
-		const FString Text = C->IsMarkingTrees()
-			? TEXT("Marking trees to fell: drag across them (hold Shift to unmark).   C when done")
-			: TEXT("Stockpiles: drag to lay one out, click one to change what it takes, Shift-drag to clear.   Z when done");
+		FString Text;
+		if (C->GetOrder() == AColony::EOrder::Build)
+		{
+			const ABuilding::FKind& K = ABuilding::Kind(C->GetBuildChoice());
+			Text = FString::Printf(TEXT("Build a %s (%d logs): click to place, R to turn.   B for the next kind, or to stop"),
+				*FString(K.Name).ToLower(), K.Logs);
+		}
+		else
+		{
+			Text = C->IsMarkingTrees()
+				? TEXT("Marking trees to fell: drag across them (hold Shift to unmark).   C when done")
+				: TEXT("Stockpiles: drag to lay one out, click one to change what it takes, Shift-drag to clear.   Z when done");
+		}
 		float W, H;
 		GetTextSize(Text, W, H, Font, 1.2f);
 		DrawRect(FLinearColor(0.35f, 0.15f, 0.02f, 0.75f), (Canvas->SizeX - W) * 0.5f - 16.f, 52.f, W + 32.f, H + 12.f);
@@ -229,6 +241,93 @@ void AAethelHUD::DrawZones(AColony* C)
 			GetTextSize(Label, W, Th, Font, 1.1f);
 			DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.45f), Screen.X - W * 0.5f - 6.f, Screen.Y - 2.f, W + 12.f, Th + 4.f);
 			DrawText(Label, FLinearColor(Color.R, Color.G, Color.B, 1.f), Screen.X - W * 0.5f, Screen.Y, Font, 1.1f);
+		}
+	}
+}
+
+void AAethelHUD::Outline(const TArray<FVector>& Corners, const FLinearColor& Color, float Thickness)
+{
+	TArray<FVector> Screen;
+	for (const FVector& P : Corners)
+	{
+		const FVector S = Project(P);
+		if (S.Z <= 0.f)
+		{
+			return;
+		}
+		Screen.Add(S);
+	}
+	for (int32 K = 0; K < Screen.Num(); ++K)
+	{
+		const FVector& A = Screen[K];
+		const FVector& B = Screen[(K + 1) % Screen.Num()];
+		DrawLine(A.X, A.Y, B.X, B.Y, Color, Thickness);
+	}
+}
+
+void AAethelHUD::DrawBuildings(AColony* C)
+{
+	const APlayerController* PC = GetOwningPlayerController();
+	FVector CamLoc;
+	FRotator CamRot;
+	PC->GetPlayerViewPoint(CamLoc, CamRot);
+	UFont* Font = GEngine->GetSmallFont();
+
+	// Building sites say how far along they are.
+	for (const ABuilding* B : C->GetBuildings())
+	{
+		if (B->IsFinished() || FVector::DistSquared(CamLoc, B->GetActorLocation()) > FMath::Square(25000.f))
+		{
+			continue;
+		}
+		const FVector Screen = Project(B->GetActorLocation() + FVector(0.f, 0.f, 350.f));
+		if (Screen.Z <= 0.f)
+		{
+			continue;
+		}
+		const FString Label = FString::Printf(TEXT("%s: %d of %d logs, %d%% built"), B->GetKind().Name, B->Delivered,
+			B->GetKind().Logs, FMath::FloorToInt(B->GetProgress() * 100.f));
+		float W, H;
+		GetTextSize(Label, W, H, Font, 1.1f);
+		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.5f), Screen.X - W * 0.5f - 6.f, Screen.Y - 2.f, W + 12.f, H + 4.f);
+		DrawText(Label, Gold, Screen.X - W * 0.5f, Screen.Y, Font, 1.1f);
+	}
+
+	// In build mode, the outline of what would go down under the cursor: green where it can,
+	// red (and why not) where it can't.
+	FHitResult Hit;
+	if (C->GetOrder() != AColony::EOrder::Build
+		|| !PC->GetHitResultUnderCursorForObjects({ UEngineTypes::ConvertToObjectType(ECC_WorldStatic) }, false, Hit))
+	{
+		return;
+	}
+	const EBuilding Type = C->GetBuildChoice();
+	const int32 Turns = C->GetBuildTurns();
+	const FIntPoint First = C->FootprintAt(Type, Turns, FVector2D(Hit.ImpactPoint));
+	FString Why;
+	const bool bOk = C->CanPlace(Type, Turns, First, &Why);
+	const FIntPoint Size = ABuilding::Footprint(Type, Turns);
+	const FVector2D Lo = C->PlaceCorner(First);
+	const FVector2D Hi = C->PlaceCorner(First + Size);
+	auto Ground = [C](float X, float Y) { return C->OnGround(X, Y) + FVector(0.f, 0.f, 10.f); };
+	const FLinearColor Color = bOk ? FLinearColor(0.4f, 1.f, 0.4f, 0.95f) : FLinearColor(1.f, 0.3f, 0.2f, 0.95f);
+	Outline({ Ground(Lo.X, Lo.Y), Ground(Hi.X, Lo.Y), Ground(Hi.X, Hi.Y), Ground(Lo.X, Hi.Y) }, Color, 2.5f);
+	// A tick on the side the door will face.
+	const FVector Centre = Ground((Lo.X + Hi.X) * 0.5f, (Lo.Y + Hi.Y) * 0.5f);
+	const FVector Front = FRotator(0.f, Turns * 90.f, 0.f).RotateVector(FVector(0.f, -1.f, 0.f));
+	const float Reach = (Turns % 2 == 0 ? Hi.Y - Lo.Y : Hi.X - Lo.X) * 0.5f;
+	const FVector Door = Ground(Centre.X + Front.X * Reach, Centre.Y + Front.Y * Reach);
+	const FVector DoorOut = Ground(Centre.X + Front.X * (Reach + 120.f), Centre.Y + Front.Y * (Reach + 120.f));
+	Outline({ Door, DoorOut }, Color, 2.5f);
+	if (!bOk)
+	{
+		const FVector S = Project(Centre + FVector(0.f, 0.f, 150.f));
+		if (S.Z > 0.f)
+		{
+			float W, H;
+			GetTextSize(Why, W, H, Font, 1.1f);
+			DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.5f), S.X - W * 0.5f - 6.f, S.Y - 2.f, W + 12.f, H + 4.f);
+			DrawText(Why, FLinearColor(1.f, 0.6f, 0.5f), S.X - W * 0.5f, S.Y, Font, 1.1f);
 		}
 	}
 }
@@ -343,6 +442,10 @@ void AAethelHUD::DrawCard(AFounder* F)
 		{
 			Kin += FString::Printf(TEXT(", parent of %s"), *O.Name);
 		}
+	}
+	if (const ABuilding* Home = F->GetHome())
+	{
+		Kin += FString::Printf(TEXT("; sleeps in the %s"), *FString(Home->GetKind().Name).ToLower());
 	}
 	DrawText(Kin, Dim, X + 16.f, Line, Small, 1.1f);
 	Line += 30.f;

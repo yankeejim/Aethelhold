@@ -2,6 +2,7 @@
 #include "Colony.h"
 #include "Forest.h"
 #include "Item.h"
+#include "Building.h"
 #include "Animation/AnimSequence.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -106,7 +107,22 @@ FString AFounder::Describe() const
 		return TEXT("Talking");
 	case EActivity::Eating: return bWalking ? TEXT("Going to the fire to eat") : TEXT("Eating by the fire");
 	case EActivity::Warming: return bWalking ? TEXT("Cold, going to the fire") : TEXT("Warming up by the fire");
-	case EActivity::Sleeping: return bWalking ? TEXT("Going to sleep") : TEXT("Asleep by the fire");
+	case EActivity::Sleeping:
+		if (Home)
+		{
+			const FString Where = FString(Home->GetKind().Name).ToLower();
+			return bWalking ? FString::Printf(TEXT("Going to bed in the %s"), *Where) : FString::Printf(TEXT("Asleep in the %s"), *Where);
+		}
+		return bWalking ? TEXT("Going to sleep") : TEXT("Asleep by the fire");
+	case EActivity::Building:
+	{
+		const FString What = Site ? FString(Site->GetKind().Name).ToLower() : FString(TEXT("building"));
+		if (bDelivering)
+		{
+			return Carried ? FString::Printf(TEXT("Carrying a log to the %s"), *What) : FString::Printf(TEXT("Fetching a log for the %s"), *What);
+		}
+		return bWalking ? FString::Printf(TEXT("Going to work on the %s"), *What) : FString::Printf(TEXT("Building the %s"), *What);
+	}
 	case EActivity::Chopping:
 		return bWalking ? TEXT("Going to fell a tree") : bWaitingForFall ? TEXT("Timber!") : TEXT("Felling a tree");
 	case EActivity::Foraging:
@@ -294,6 +310,12 @@ bool AFounder::CarryTo(AItem* Item)
 
 void AFounder::LetGo()
 {
+	if (bDelivering && Site)
+	{
+		Site->Incoming = FMath::Max(0, Site->Incoming - 1);
+	}
+	bDelivering = false;
+	Site = nullptr;
 	if (Carried)
 	{
 		Colony->Unreserve(CarrySpot);
@@ -378,6 +400,41 @@ bool AFounder::FindWork()
 		return true;
 	};
 
+	auto Build = [&]()
+	{
+		if (bChild)
+		{
+			return false;
+		}
+		// Raise what has its logs already; otherwise bring logs to a site that wants them.
+		if (ABuilding* Work = Colony->SiteToWork(GetActorLocation()))
+		{
+			Site = Work;
+			bDelivering = false;
+			Activity = EActivity::Building;
+			const FVector Door = Work->DoorOutside();
+			const FVector Side = FRotator(0.f, Work->GetActorRotation().Yaw, 0.f).RotateVector(FVector(Rng.FRandRange(-150.f, 150.f), 0.f, 0.f));
+			Target = Colony->OnGround(Door.X + Side.X, Door.Y + Side.Y);
+			bHasTarget = true;
+			return true;
+		}
+		ABuilding* Wants = Colony->SiteNeedingLogs(GetActorLocation());
+		AItem* Log = Wants ? Colony->LogToTake(GetActorLocation()) : nullptr;
+		if (!Log)
+		{
+			return false;
+		}
+		Site = Wants;
+		Site->Incoming += 1;
+		bDelivering = true;
+		Fetching = Log;
+		Log->bClaimed = true;
+		Activity = EActivity::Building;
+		Target = Colony->OnGround(Log->GetActorLocation().X, Log->GetActorLocation().Y);
+		bHasTarget = true;
+		return true;
+	};
+
 	// Each turns first to their own trade, then lends a hand where it's needed.
 	if (bChild)
 	{
@@ -386,10 +443,10 @@ bool AFounder::FindWork()
 	switch (Info.Skill)
 	{
 	case ESkill::Fisher: return Fish();
-	case ESkill::Woodcutter:
-	case ESkill::Builder: return Chop() || Haul() || Forage();
-	case ESkill::Herder: return Haul() || Chop() || Forage();
-	default: return Forage() || Haul() || Chop();
+	case ESkill::Builder: return Build() || Chop() || Haul() || Forage();
+	case ESkill::Woodcutter: return Chop() || Build() || Haul() || Forage();
+	case ESkill::Herder: return Haul() || Build() || Chop() || Forage();
+	default: return Forage() || Haul() || Build() || Chop();
 	}
 }
 
@@ -401,6 +458,39 @@ void AFounder::Arrive()
 		SetActorRotation(FRotator(0.f, (Where - GetActorLocation()).Rotation().Yaw, 0.f));
 	};
 
+	if (Activity == EActivity::Building && bDelivering)
+	{
+		if (Fetching)
+		{
+			// Picked up the log; now off to the site.
+			Carried = Fetching;
+			Fetching = nullptr;
+			Colony->Unstore(Carried);
+			Carried->bClaimed = true;
+			const FVector Door = Site->DoorOutside();
+			Target = Colony->OnGround(Door.X, Door.Y);
+			bHasTarget = true;
+			return;
+		}
+		if (Carried)
+		{
+			Colony->Deliver(Carried, Site);
+			Carried = nullptr;
+		}
+		bDelivering = false;
+		Site = nullptr;
+		Activity = EActivity::Resting;
+		Pause = 0.05f;
+		return;
+	}
+	if (Activity == EActivity::Sleeping && bEntering && Home)
+	{
+		// In through the door, then to bed.
+		bEntering = false;
+		Target = Home->BedSpot(Bed);
+		bHasTarget = true;
+		return;
+	}
 	if (Carried)
 	{
 		// At the stockpile with something to put down.
@@ -414,8 +504,22 @@ void AFounder::Arrive()
 	switch (Activity)
 	{
 	case EActivity::Sleeping:
-		Face(Colony->GetFire());
+		if (Home)
+		{
+			SetActorRotation(FRotator(0.f, Home->BedYaw(Bed), 0.f));
+		}
+		else
+		{
+			Face(Colony->GetFire());
+		}
 		LieDown(true);
+		break;
+	case EActivity::Building:
+		if (Site)
+		{
+			Face(Site->GetActorLocation());
+			WorkLeft = 0.5f;
+		}
 		break;
 	case EActivity::Eating:
 		Face(Colony->GetFire());
@@ -496,6 +600,21 @@ void AFounder::Work(float GameHours)
 	}
 	switch (Activity)
 	{
+	case EActivity::Building:
+		if (Site && Site->CanWork())
+		{
+			Site->AddWork(0.5f);
+			Colony->OnBuilt(Site);
+			if (Site->CanWork())
+			{
+				WorkLeft = 0.5f;
+				break;
+			}
+		}
+		Site = nullptr;
+		Activity = EActivity::Resting;
+		Pause = 0.05f;
+		break;
 	case EActivity::Chopping:
 		Forest->Fell(Tree, GetActorLocation());
 		bWaitingForFall = true;
@@ -552,10 +671,14 @@ void AFounder::Live(float GameHours)
 	Food = FMath::Clamp(Food - GameHours / 24.f, 0.f, 1.f);
 	const bool bAsleep = Activity == EActivity::Sleeping && !bHasTarget;
 	const bool bWorking = Activity == EActivity::Chopping || Activity == EActivity::Hauling
-		|| Activity == EActivity::Fishing || Activity == EActivity::Foraging;
+		|| Activity == EActivity::Fishing || Activity == EActivity::Foraging || Activity == EActivity::Building;
 	Rest = FMath::Clamp(Rest + (bAsleep ? GameHours / 7.f : -GameHours / (bWorking ? 13.f : 17.f)), 0.f, 1.f);
 	const bool bByFire = FVector::Dist2D(GetActorLocation(), Colony->GetFire()) < 450.f;
-	const float WarmthHere = bByFire ? 1.f : FMath::Clamp((Colony->Temperature() - 4.f) / 14.f, 0.f, 1.f);
+	// Under a roof the night air can't get at them: a cabin keeps them warm, a lean-to helps.
+	const bool bAtHome = bAsleep && Home;
+	const float Air = FMath::Clamp((Colony->Temperature() - 4.f) / 14.f, 0.f, 1.f);
+	const float WarmthHere = bByFire ? 1.f
+		: bAtHome ? (Home->GetType() == EBuilding::Cabin ? 1.f : FMath::Max(Air, 0.75f)) : Air;
 	Warmth += (WarmthHere - Warmth) * FMath::Min(1.f, GameHours * (bByFire ? 1.5f : 0.5f));
 
 	// What needs doing most: sleep at night, eat at mealtimes, warm up when cold. A tree
@@ -587,8 +710,9 @@ void AFounder::Live(float GameHours)
 		LieDown(false);
 		const FVector Fire = Colony->GetFire();
 		const float Angle = Index * 2.f * PI / Colony->GetFounders().Num() + 0.4f;
-		Target = Want == EActivity::Sleeping ? SleepSpot()
+		Target = Want == EActivity::Sleeping ? (Home ? Home->DoorOutside() : SleepSpot())
 			: Colony->OnGround(Fire.X + 190.f * FMath::Cos(Angle), Fire.Y + 190.f * FMath::Sin(Angle));
+		bEntering = Want == EActivity::Sleeping && Home;
 		bHasTarget = true;
 	}
 	else if (!bUrgent && (Activity == EActivity::Sleeping || Activity == EActivity::Warming

@@ -15,6 +15,7 @@
 #include "EngineUtils.h"
 #include "Founder.h"
 #include "Forest.h"
+#include "Building.h"
 
 AStewardCamera::AStewardCamera()
 {
@@ -113,6 +114,8 @@ void AStewardCamera::BuildInput()
 	FollowAction = Button(EKeys::F);
 	MarkAction = Button(EKeys::C);
 	StockpileAction = Button(EKeys::Z);
+	BuildAction = Button(EKeys::B);
+	RotateAction = Button(EKeys::R);
 }
 
 void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -142,6 +145,8 @@ void AStewardCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(FollowAction, ETriggerEvent::Started, this, &AStewardCamera::OnFollow);
 		EIC->BindAction(MarkAction, ETriggerEvent::Started, this, &AStewardCamera::OnMarkTrees);
 		EIC->BindAction(StockpileAction, ETriggerEvent::Started, this, &AStewardCamera::OnStockpiles);
+		EIC->BindAction(BuildAction, ETriggerEvent::Started, this, &AStewardCamera::OnBuild);
+		EIC->BindAction(RotateAction, ETriggerEvent::Started, this, &AStewardCamera::OnTurn90);
 		EIC->BindAction(SelectAction, ETriggerEvent::Completed, this, &AStewardCamera::OnSelectReleased);
 	}
 }
@@ -185,8 +190,18 @@ void AStewardCamera::OnSelect()
 	{
 		return;
 	}
-	// Marking trees or drawing stockpiles: press, drag across the ground, let go.
 	AColony* C = GetColony();
+	// Building: a click puts the chosen building down where the outline shows.
+	if (C && C->GetOrder() == AColony::EOrder::Build)
+	{
+		FVector At;
+		if (GroundUnderCursor(At))
+		{
+			C->PlaceBuilding(C->GetBuildChoice(), C->GetBuildTurns(), FVector2D(At));
+		}
+		return;
+	}
+	// Marking trees or drawing stockpiles: press, drag across the ground, let go.
 	if (C && C->GetOrder() != AColony::EOrder::None)
 	{
 		bDragging = GroundUnderCursor(DragStart);
@@ -269,6 +284,22 @@ void AStewardCamera::OnMarkTrees()
 	if (AColony* C = GetColony())
 	{
 		C->ToggleOrder(AColony::EOrder::MarkTrees);
+	}
+}
+
+void AStewardCamera::OnBuild()
+{
+	if (AColony* C = GetColony())
+	{
+		C->NextBuildChoice();
+	}
+}
+
+void AStewardCamera::OnTurn90()
+{
+	if (AColony* C = GetColony())
+	{
+		C->TurnBuildChoice();
 	}
 }
 

@@ -7,13 +7,14 @@ int32 Storage::Capacity(EItem Kind)
 	return Kind == EItem::Log ? 15 : 9;
 }
 
-FVector Storage::SlotOffset(EItem Kind, int32 Slot)
+FVector Storage::SlotOffset(EItem Kind, int32 Slot, bool bIndoor)
 {
+	const float Step = bIndoor ? 45.f : 70.f;
 	if (Kind == EItem::Log)
 	{
 		return FVector(0.f, -80.f + 40.f * (Slot % 5), 13.f + 25.f * (Slot / 5));
 	}
-	return FVector(-70.f + 70.f * (Slot % 3), -70.f + 70.f * (Slot / 3), 13.f);
+	return FVector(-Step + Step * (Slot % 3), -Step + Step * (Slot / 3), 13.f);
 }
 
 bool FStorePlace::IsEmpty() const

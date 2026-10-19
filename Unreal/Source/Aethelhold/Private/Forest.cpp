@@ -205,6 +205,16 @@ void AForest::Fell(int32 Index, const FVector& Feller)
 	Falling.Add(Index);
 }
 
+void AForest::Clear(int32 Index)
+{
+	FTreeSpot& Spot = Trees[Index];
+	if (!Spot.bGone)
+	{
+		Groups[Spot.Group]->RemoveInstance(Spot.Instance);
+		Spot.bGone = true;
+	}
+}
+
 void AForest::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);

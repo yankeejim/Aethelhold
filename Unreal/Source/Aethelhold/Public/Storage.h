@@ -17,8 +17,9 @@ namespace Storage
 	constexpr float PlaceSize = 220.f;
 
 	int32 Capacity(EItem Kind);
-	/** Where the Slot-th item of a kind sits within a place, relative to its centre on the ground. */
-	FVector SlotOffset(EItem Kind, int32 Slot);
+	/** Where the Slot-th item of a kind sits within a place, relative to its centre on the ground.
+	 *  Indoors, things are packed closer to keep clear of the walls. */
+	FVector SlotOffset(EItem Kind, int32 Slot, bool bIndoor = false);
 	inline FIntPoint PlaceAt(const FVector2D& World)
 	{
 		return FIntPoint(FMath::FloorToInt(World.X / PlaceSize), FMath::FloorToInt(World.Y / PlaceSize));
@@ -55,6 +56,8 @@ struct FStoreZone
 	EStoreFilter Accepts = EStoreFilter::Everything;
 	TArray<FIntPoint> Places;
 	bool bRemoved = false;
+	/** Inside a storehouse: dry and shaded, so food lasts longer. Not drawn or changed by hand. */
+	bool bIndoor = false;
 
 	bool Takes(EItem Kind) const;
 };

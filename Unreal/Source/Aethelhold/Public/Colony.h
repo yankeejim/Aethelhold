@@ -9,6 +9,8 @@
 class AFounder;
 class AForest;
 class AItem;
+class ABuilding;
+enum class EBuilding : uint8;
 enum class EItem : uint8;
 class ADirectionalLight;
 class UPointLightComponent;
@@ -73,6 +75,8 @@ public:
 	bool HasRoomFor(EItem Kind) const;
 	FVector SpotLocation(const FStoreSpot& Spot, EItem Kind) const;
 	void Store(AItem* Item, const FStoreSpot& Spot);
+	/** Takes an item out of its stockpile place (taken, eaten, rotted, or its stockpile removed). */
+	void Unstore(AItem* Item);
 	/** Draws a new stockpile over a rectangle (world cm); returns how many places it got. */
 	int32 AddZone(const FVector2D& A, const FVector2D& B);
 	/** Removes stockpiles under a rectangle; what lay in them is left loose. */
@@ -84,10 +88,34 @@ public:
 	FVector PlaceCenter(const FIntPoint& Place) const;
 
 	// --- what the player is doing ---
-	enum class EOrder : uint8 { None, MarkTrees, Stockpiles };
+	enum class EOrder : uint8 { None, MarkTrees, Stockpiles, Build };
 	EOrder GetOrder() const { return Order; }
 	void ToggleOrder(EOrder O) { Order = Order == O ? EOrder::None : O; }
 	bool IsMarkingTrees() const { return Order == EOrder::MarkTrees; }
+	/** Build mode: B steps through what to build (and back out); R turns it. */
+	void NextBuildChoice();
+	void TurnBuildChoice() { BuildTurns = (BuildTurns + 1) % 4; }
+	EBuilding GetBuildChoice() const { return BuildChoice; }
+	int32 GetBuildTurns() const { return BuildTurns; }
+
+	// --- buildings (Building.h) ---
+	/** The first place a footprint would start at, centred on a point of ground. */
+	FIntPoint FootprintAt(EBuilding Type, int32 Turns, const FVector2D& Centre) const;
+	/** Whether it can go there; Why says what's in the way. */
+	bool CanPlace(EBuilding Type, int32 Turns, const FIntPoint& First, FString* Why = nullptr) const;
+	ABuilding* PlaceBuilding(EBuilding Type, int32 Turns, const FVector2D& Centre);
+	const TArray<TObjectPtr<ABuilding>>& GetBuildings() const { return Buildings; }
+	/** The nearest unfinished building that still wants logs / has work to do. */
+	ABuilding* SiteNeedingLogs(const FVector& From) const;
+	ABuilding* SiteToWork(const FVector& From) const;
+	/** The nearest log anyone may take (stored or lying loose). */
+	AItem* LogToTake(const FVector& From) const;
+	/** A log arrives at a building site. */
+	void Deliver(AItem* Log, ABuilding* Site);
+	/** Called as building work is done; sorts out what a finished building brings. */
+	void OnBuilt(ABuilding* Building);
+	/** The world X/Y of a place's corner nearest the origin. */
+	FVector2D PlaceCorner(const FIntPoint& Place) const;
 
 	// --- news, as the founders would tell it ---
 	void Say(const FString& Text);
@@ -105,8 +133,7 @@ private:
 	void BuildCampfire();
 	void UpdateSun();
 	void Spoil(float GameHours);
-	/** Takes an item out of its stockpile place (eaten, rotted or its stockpile removed). */
-	void Unstore(AItem* Item);
+	void AssignHomes();
 	/** How fast food rots here and now: 1 is the usual pace in the open. */
 	float SpoilRate(const AItem* Item) const;
 
@@ -125,6 +152,13 @@ private:
 	TArray<FStoreZone> Zones;
 	TMap<FIntPoint, FStorePlace> Places;
 	EOrder Order = EOrder::None;
+	EBuilding BuildChoice;
+	int32 BuildTurns = 0;
+
+	UPROPERTY()
+	TArray<TObjectPtr<ABuilding>> Buildings;
+	/** Places of ground under buildings, to the building's index. */
+	TMap<FIntPoint, int32> Occupied;
 	TArray<FNews> News;
 
 	UPROPERTY()

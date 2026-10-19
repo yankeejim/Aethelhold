@@ -64,6 +64,8 @@ public:
 	int32 NearestForage(const FVector& From, float Range) const;
 	/** Starts a tree toppling, away from the given point. */
 	void Fell(int32 Index, const FVector& Feller);
+	/** Takes a tree away at once, with no logs (for clearing a test site). */
+	void Clear(int32 Index);
 	/** True once a felled tree has hit the ground and been cleared away. */
 	bool IsDown(int32 Index) const { return Trees[Index].bGone; }
 
