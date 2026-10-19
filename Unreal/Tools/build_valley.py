@@ -199,16 +199,7 @@ def grass_type():
     for name, code, letters, density, scale in near:
         for var in letters:
             varieties.append(grass_variety(plant_mesh(name, code, var), density / len(letters) * 8,
-                                           4500, 7500, scale, True))
-    # Far: the bigger clumps only, sparse and larger, out to 180 m so the meadow doesn't go bald.
-    # Middle distance: the same mix, thinner and without shadows, out to 120 m.
-    for name, code, letters, density, scale in near[:3]:
-        for var in letters[:3]:
-            varieties.append(grass_variety(plant_mesh(name, code, var), density * 1.2,
-                                           9000, 12000, (scale[0] * 1.3, scale[1] * 1.3), False))
-    # Far: the bigger clumps only, larger still, out to 250 m so the meadow doesn't go bald.
-    for var in "ABDE":
-        varieties.append(grass_variety(plant_mesh("Wild_Grass", "vlkhcbxia", var), 9.0, 20000, 25000, (2.4, 3.4), False))
+                                           6000, 9000, scale, True))
     grass.set_editor_property("grass_varieties", varieties)
     unreal.EditorAssetLibrary.save_loaded_asset(grass)
     return grass
@@ -292,6 +283,25 @@ def ground_material(grass, forest_mask):
     lush = g.ramp(g.mul(big, mid), 0.12, 0.4)
     meadow = surface(g, xy, "meadow", 260)
     meadow["colour"] = g.mul(meadow["colour"], g.lerp(g.color((0.5, 0.75, 0.33)), g.color((0.4, 0.68, 0.26)), lush))
+    # Seen from afar a meadow is a soft sward, not a photo of dry stalks repeated every few
+    # meters: past the grass clumps, fade the texture into the colour of the grass itself,
+    # varied only in broad patches.
+    eye = g.node(unreal.MaterialExpressionCameraPositionWS)
+    to_eye = g.sub(pos, eye)
+    dist = g.node(unreal.MaterialExpressionLength)
+    link(to_eye, "", dist, "")
+    far = g.ramp(dist, 4000, 9000)
+    patches = g.noise(pos, 0.00012, 3)
+    tufts = g.noise(pos, 0.0007, 2)
+    sward = g.lerp(g.color((0.075, 0.115, 0.03)), g.color((0.15, 0.165, 0.055)),
+                   g.lerp(g.lerp(patches, lush, g.const(0.4)), tufts, g.const(0.35)))
+    # Keep a little of the photo's light and dark so it isn't a flat colour.
+    grain = g.mul(g.mask(g.sample(unreal.load_asset(
+        "/Game/Fab/Megascans/Surfaces/Dried_Grass_xbrgaba/High/xbrgaba_tier_1/Textures/T_xbrgaba_4K_B"),
+        g.div(xy, 900.0), unreal.MaterialSamplerType.SAMPLERTYPE_COLOR), "g", "RGB"), 2.2)
+    sward = g.mul(sward, g.lerp(g.const(1.0), grain, g.const(0.35)))
+    meadow["colour"] = g.lerp(meadow["colour"], sward, far)
+    meadow["normal"] = g.lerp(meadow["normal"], g.color((0.0, 0.0, 1.0)), g.mul(far, 0.8))
     forest = surface(g, xy, "forest", 300)
     # Darker, browner leaf litter in the shade of the woods.
     forest["colour"] = g.mul(forest["colour"], g.color((0.62, 0.62, 0.5)))
